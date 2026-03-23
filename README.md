@@ -87,3 +87,10 @@ dexo/
 │   └── Models/               # API 响应模型
 └── Assets.xcassets/
 ```
+## 鸣谢
+
+本项目所使用的 AI 能力均来自 **[Linux.do](https://linux.do)**
+
+> 学 AI，上 L 站。
+
+感谢 Linux.do 社区提供的资源与支持，让本项目得以实现。
