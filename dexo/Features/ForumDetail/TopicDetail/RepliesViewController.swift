@@ -1,5 +1,6 @@
-import UIKit
+import CookedHTML
 import SafariServices
+import UIKit
 
 final class RepliesViewController: UIViewController {
     private let api: DiscourseAPI
@@ -8,42 +9,42 @@ final class RepliesViewController: UIViewController {
     private let baseURL: String
 
     private var replies: [DiscourseTopicDetail.Post] = []
-    private var renderedPosts: [Int: PostContentRenderer.RenderedPost] = [:]
-    private var openDetailsPerPost: [Int: Set<Int>] = [:]
-    private var reRenderingPostIds: Set<Int> = []
+    private var parsedBlocks: [Int: [AnnotatedBlock]] = [:]
+    private var unsupportedPostIds: Set<Int> = []
 
     private lazy var tableView: UITableView = {
         let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.register(PostWebViewCell.self, forCellReuseIdentifier: PostWebViewCell.reuseIdentifier)
+        tv.register(PostNativeCell.self, forCellReuseIdentifier: PostNativeCell.reuseIdentifier)
         tv.delegate = self
         tv.separatorStyle = .none
         return tv
     }()
 
-    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = {
-        UITableViewDiffableDataSource<Int, Int>(tableView: tableView) { [weak self] tableView, indexPath, postId in
-            guard let self,
-                  let cell = tableView.dequeueReusableCell(withIdentifier: PostWebViewCell.reuseIdentifier, for: indexPath) as? PostWebViewCell,
-                  let post = self.replies.first(where: { $0.id == postId }),
-                  let rendered = self.renderedPosts[postId] else {
-                return UITableViewCell()
-            }
-            let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
-            cell.configure(
-                with: post,
-                snapshot: rendered.snapshot,
-                contentHeight: rendered.height,
-                interactiveRegions: rendered.interactiveRegions,
-                codeBlocks: rendered.codeBlocks,
-                baseURL: self.baseURL,
-                delegate: self,
-                floorNumber: indexPath.row + 1,
-                postLink: postLink
-            )
-            return cell
+    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = .init(tableView: tableView) { [weak self] tableView, indexPath, postId in
+        guard let self,
+              let post = self.replies.first(where: { $0.id == postId }),
+              let annotatedBlocks = self.parsedBlocks[postId],
+              let cell = tableView.dequeueReusableCell(withIdentifier: PostNativeCell.reuseIdentifier, for: indexPath) as? PostNativeCell
+        else {
+            return UITableViewCell()
         }
-    }()
+        let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
+        let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
+        let hasUnsupported = self.unsupportedPostIds.contains(postId)
+        cell.configure(
+            with: post,
+            annotatedBlocks: annotatedBlocks,
+            config: config,
+            delegate: self,
+            floorNumber: indexPath.row + 1,
+            postLink: postLink,
+            baseURL: self.baseURL,
+            hasUnsupportedBlocks: hasUnsupported,
+            cookedHTML: post.cooked
+        )
+        return cell
+    }
 
     private let activityIndicator: UIActivityIndicatorView = {
         let ai = UIActivityIndicatorView(style: .medium)
@@ -60,20 +61,18 @@ final class RepliesViewController: UIViewController {
         super.init(nibName: nil, bundle: nil)
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        title = "Replies"
         view.backgroundColor = .systemBackground
-        title = "回复"
 
         view.addSubview(tableView)
         view.addSubview(activityIndicator)
-
-        // Push content down to avoid overlapping with the sheet grabber
-        tableView.contentInset.top = 16
 
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -90,45 +89,37 @@ final class RepliesViewController: UIViewController {
         }
     }
 
+    // MARK: - Data Loading
+
     private func loadReplies() async {
         activityIndicator.startAnimating()
+
         do {
-            let posts = try await api.fetchPostReplies(postId: postId)
-            replies = posts
+            let response = try await api.fetchPostReplies(postId: postId)
+            replies = response
+            parsedBlocks = [:]
+            unsupportedPostIds = []
 
-            let containerWidth = view.bounds.width
-            let _ = await PostContentRenderer.shared.renderPosts(
-                posts,
-                baseURL: baseURL,
-                containerWidth: containerWidth
-            ) { [weak self] postId, rendered in
-                guard let self else { return }
-                renderedPosts[postId] = rendered
-                applySnapshot()
+            for post in response {
+                let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: baseURL)
+                parsedBlocks[post.id] = annotated
+                let hasUnsupported = annotated.contains { ab in
+                    !NativeContentRenderer.renderers.contains { $0.canRender(ab.block) }
+                }
+                if hasUnsupported {
+                    unsupportedPostIds.insert(post.id)
+                }
             }
+
+            var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
+            snapshot.appendSections([0])
+            snapshot.appendItems(response.map(\.id), toSection: 0)
+            await dataSource.apply(snapshot, animatingDifferences: false)
         } catch {
-            // Silently handle — the user can dismiss and retry
+            // silently fail
         }
+
         activityIndicator.stopAnimating()
-    }
-
-    private func applySnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
-        snapshot.appendSections([0])
-        var seen = Set<Int>()
-        let renderedIds = replies.compactMap { post -> Int? in
-            guard renderedPosts[post.id] != nil, seen.insert(post.id).inserted else { return nil }
-            return post.id
-        }
-        snapshot.appendItems(renderedIds, toSection: 0)
-        dataSource.apply(snapshot, animatingDifferences: false)
-    }
-
-    // MARK: - Link Handling
-
-    private func handleLink(_ url: URL) {
-        let safari = SFSafariViewController(url: url)
-        present(safari, animated: true)
     }
 }
 
@@ -136,35 +127,28 @@ final class RepliesViewController: UIViewController {
 
 extension RepliesViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        guard let postId = dataSource.itemIdentifier(for: indexPath),
-              let rendered = renderedPosts[postId] else {
-            return UITableView.automaticDimension
-        }
-        return PostWebViewCell.headerHeight + rendered.height + PostWebViewCell.bottomBarHeight
+        UITableView.automaticDimension
     }
 
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
-        guard let postId = dataSource.itemIdentifier(for: indexPath),
-              let rendered = renderedPosts[postId] else {
-            return 200
-        }
-        return PostWebViewCell.headerHeight + rendered.height + PostWebViewCell.bottomBarHeight
+        200
     }
 }
 
-// MARK: - PostWebViewCellDelegate
+// MARK: - PostCellDelegate
 
-extension RepliesViewController: PostWebViewCellDelegate {
-    func postWebViewCell(_ cell: PostWebViewCell, didTapImageURL url: URL) {
+extension RepliesViewController: PostCellDelegate {
+    func postCell(didTapImageURL url: URL) {
         let safari = SFSafariViewController(url: url)
         present(safari, animated: true)
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapLinkURL url: URL) {
-        handleLink(url)
+    func postCell(didTapLinkURL url: URL) {
+        let safari = SFSafariViewController(url: url)
+        present(safari, animated: true)
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapShowRepliesForPostId postId: Int) {
+    func postCell(didTapShowRepliesForPostId postId: Int) {
         let repliesVC = RepliesViewController(api: api, postId: postId, topicId: topicId)
         if let sheet = repliesVC.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
@@ -173,59 +157,26 @@ extension RepliesViewController: PostWebViewCellDelegate {
         present(repliesVC, animated: true)
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapToggleDetails detailsIndex: Int, postId: Int) {
-        guard !reRenderingPostIds.contains(postId) else { return }
-        reRenderingPostIds.insert(postId)
-
-        var indices = openDetailsPerPost[postId] ?? []
-        if indices.contains(detailsIndex) {
-            indices.remove(detailsIndex)
-        } else {
-            indices.insert(detailsIndex)
-        }
-        openDetailsPerPost[postId] = indices
-
-        guard let post = replies.first(where: { $0.id == postId }) else { return }
-        Task {
-            let rendered = await PostContentRenderer.shared.reRenderPost(
-                cooked: post.cooked,
-                baseURL: baseURL,
-                width: view.bounds.width,
-                openDetailsIndices: indices
-            )
-            renderedPosts[postId] = rendered
-            var snapshot = dataSource.snapshot()
-            snapshot.reconfigureItems([postId])
-            await dataSource.apply(snapshot, animatingDifferences: false)
-            tableView.beginUpdates()
-            tableView.endUpdates()
-            self.reRenderingPostIds.remove(postId)
-        }
+    func postCell(didTapToggleDetails detailsIndex: Int, postId: Int) {
+        // Details toggle not supported in native rendering — no-op
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapReplyToPost post: DiscourseTopicDetail.Post) {
-        guard let authGate = findAuthGate() else { return }
+    func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) {
+        guard let authGate = findAuthGating() else { return }
         authGate.requireAuth { [weak self] in
             guard let self else { return }
             self.presentReplyComposer(for: post)
         }
     }
 
-    private func findAuthGate() -> AuthGating? {
+    private func findAuthGating() -> AuthGating? {
         var vc: UIViewController? = self
-        while let parent = vc?.presentingViewController ?? vc?.parent {
-            if let gate = parent as? AuthGating {
-                return gate
-            }
-            // Walk through children to find ForumContainerViewController
+        while let parent = vc?.parent {
+            if let gate = parent as? AuthGating { return gate }
             for child in parent.children {
-                if let gate = child as? AuthGating {
-                    return gate
-                }
+                if let gate = child as? AuthGating { return gate }
                 for grandchild in child.children {
-                    if let gate = grandchild as? AuthGating {
-                        return gate
-                    }
+                    if let gate = grandchild as? AuthGating { return gate }
                 }
             }
             vc = parent
@@ -242,9 +193,7 @@ extension RepliesViewController: PostWebViewCellDelegate {
         )
         composer.onPostCreated = { [weak self] in
             guard let self else { return }
-            Task {
-                await self.loadReplies()
-            }
+            Task { await self.loadReplies() }
         }
         let nav = UINavigationController(rootViewController: composer)
         if let sheet = nav.sheetPresentationController {

@@ -4,6 +4,9 @@ let developmentTeam = Environment.developmentTeam.getString(default: "")
 
 let project = Project(
     name: "dexo",
+    packages: [
+        .local(path: "Packages/CookedHTML"),
+    ],
     settings: .settings(
         base: [
             "DEVELOPMENT_TEAM": .string(developmentTeam),
@@ -37,6 +40,7 @@ let project = Project(
                 .external(name: "GRDB"),
                 .external(name: "SDWebImage"),
                 .external(name: "Lightbox"),
+                .package(product: "CookedHTML"),
             ],
             settings: .settings(
                 base: [

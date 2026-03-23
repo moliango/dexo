@@ -1,10 +1,12 @@
 import Foundation
 import UIKit
+import CookedHTML
 
 @Observable
 final class TopicDetailViewModel {
     var topic: DiscourseTopicDetail?
-    var renderedPosts: [Int: PostContentRenderer.RenderedPost] = [:]
+    var parsedBlocks: [Int: [AnnotatedBlock]] = [:]
+    var unsupportedPostIds: Set<Int> = []
     var isLoading = false
     var isReady = false
     var isLoadingMore = false
@@ -13,8 +15,6 @@ final class TopicDetailViewModel {
     private let api: DiscourseAPI
     private var allPostIds: [Int] = []
     private var loadedPostIds: Set<Int> = []
-    private var openDetailsPerPost: [Int: Set<Int>] = [:]
-    private var reRenderingPostIds: Set<Int> = []
 
     init(api: DiscourseAPI) {
         self.api = api
@@ -36,7 +36,8 @@ final class TopicDetailViewModel {
         isLoading = true
         isReady = false
         errorMessage = nil
-        renderedPosts = [:]
+        parsedBlocks = [:]
+        unsupportedPostIds = []
 
         do {
             let detail = try await api.fetchTopic(id: id)
@@ -53,18 +54,12 @@ final class TopicDetailViewModel {
                 return
             }
 
-            // Render progressively — show each post as it finishes
-            let _ = await PostContentRenderer.shared.renderPosts(
-                postsToRender,
-                baseURL: api.baseURL,
-                containerWidth: containerWidth
-            ) { [self] postId, rendered in
-                renderedPosts[postId] = rendered
-                if !isReady {
-                    isReady = true
-                    isLoading = false
-                }
+            // Parse all posts with annotated blocks
+            for post in postsToRender {
+                parseAndStore(post: post)
             }
+
+            isReady = true
         } catch {
             #if DEBUG
             print("[TopicDetail] Load failed: \(error)")
@@ -103,15 +98,7 @@ final class TopicDetailViewModel {
 
             for post in newPosts {
                 loadedPostIds.insert(post.id)
-            }
-
-            // Render progressively — each post appears as it finishes
-            let _ = await PostContentRenderer.shared.renderPosts(
-                newPosts,
-                baseURL: api.baseURL,
-                containerWidth: containerWidth
-            ) { [self] postId, rendered in
-                renderedPosts[postId] = rendered
+                parseAndStore(post: post)
             }
         } catch {
             // Silently fail; user can scroll again to retry
@@ -120,26 +107,18 @@ final class TopicDetailViewModel {
         isLoadingMore = false
     }
 
-    func toggleDetails(postId: Int, detailsIndex: Int, containerWidth: CGFloat) async {
-        guard !reRenderingPostIds.contains(postId) else { return }
-        reRenderingPostIds.insert(postId)
-        defer { reRenderingPostIds.remove(postId) }
+    // MARK: - Private
 
-        var indices = openDetailsPerPost[postId] ?? []
-        if indices.contains(detailsIndex) {
-            indices.remove(detailsIndex)
-        } else {
-            indices.insert(detailsIndex)
+    private func parseAndStore(post: DiscourseTopicDetail.Post) {
+        let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: api.baseURL)
+        parsedBlocks[post.id] = annotated
+
+        // Check if any block has no native renderer
+        let hasUnsupported = annotated.contains { ab in
+            !NativeContentRenderer.renderers.contains { $0.canRender(ab.block) }
         }
-        openDetailsPerPost[postId] = indices
-
-        guard let post = posts.first(where: { $0.id == postId }) else { return }
-        let rendered = await PostContentRenderer.shared.reRenderPost(
-            cooked: post.cooked,
-            baseURL: api.baseURL,
-            width: containerWidth,
-            openDetailsIndices: indices
-        )
-        renderedPosts[postId] = rendered
+        if hasUnsupported {
+            unsupportedPostIds.insert(post.id)
+        }
     }
 }

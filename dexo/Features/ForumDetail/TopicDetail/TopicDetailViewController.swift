@@ -1,7 +1,7 @@
-import UIKit
+import Lightbox
 import SafariServices
 import SDWebImage
-import Lightbox
+import UIKit
 
 final class TopicDetailViewController: ObservableViewController {
     private let viewModel: TopicDetailViewModel
@@ -9,43 +9,44 @@ final class TopicDetailViewController: ObservableViewController {
     private let topicId: Int
     private let baseURL: String
     private var hasTitleHeader = false
-    private var isTogglingDetails = false
 
     private lazy var tableView: UITableView = {
         let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.register(PostWebViewCell.self, forCellReuseIdentifier: PostWebViewCell.reuseIdentifier)
+        tv.register(PostNativeCell.self, forCellReuseIdentifier: PostNativeCell.reuseIdentifier)
         tv.delegate = self
         tv.separatorStyle = .none
         tv.isHidden = true
         return tv
     }()
 
-    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = {
-        UITableViewDiffableDataSource<Int, Int>(tableView: tableView) { [weak self] tableView, indexPath, postId in
-            guard let self,
-                  let cell = tableView.dequeueReusableCell(withIdentifier: PostWebViewCell.reuseIdentifier, for: indexPath) as? PostWebViewCell,
-                  let post = self.viewModel.posts.first(where: { $0.id == postId }),
-                  let rendered = self.viewModel.renderedPosts[postId] else {
-                return UITableViewCell()
-            }
-            let visiblePosts = self.viewModel.visiblePosts
-            let floorNumber = (visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
-            let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
-            cell.configure(
-                with: post,
-                snapshot: rendered.snapshot,
-                contentHeight: rendered.height,
-                interactiveRegions: rendered.interactiveRegions,
-                codeBlocks: rendered.codeBlocks,
-                baseURL: self.baseURL,
-                delegate: self,
-                floorNumber: floorNumber,
-                postLink: postLink
-            )
-            return cell
+    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = .init(tableView: tableView) { [weak self] tableView, indexPath, postId in
+        guard let self,
+              let post = self.viewModel.posts.first(where: { $0.id == postId }),
+              let annotatedBlocks = self.viewModel.parsedBlocks[postId],
+              let cell = tableView.dequeueReusableCell(withIdentifier: PostNativeCell.reuseIdentifier, for: indexPath) as? PostNativeCell
+        else {
+            return UITableViewCell()
         }
-    }()
+        let visiblePosts = self.viewModel.visiblePosts
+        let floorNumber = (visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
+        let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
+        let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
+        let hasUnsupported = self.viewModel.unsupportedPostIds.contains(postId)
+
+        cell.configure(
+            with: post,
+            annotatedBlocks: annotatedBlocks,
+            config: config,
+            delegate: self,
+            floorNumber: floorNumber,
+            postLink: postLink,
+            baseURL: self.baseURL,
+            hasUnsupportedBlocks: hasUnsupported,
+            cookedHTML: post.cooked
+        )
+        return cell
+    }
 
     private let activityIndicator: UIActivityIndicatorView = {
         let ai = UIActivityIndicatorView(style: .medium)
@@ -111,6 +112,7 @@ final class TopicDetailViewController: ObservableViewController {
         hidesBottomBarWhenPushed = true
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -142,7 +144,7 @@ final class TopicDetailViewController: ObservableViewController {
             errorLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
 
             replyButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            replyButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            replyButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -60),
             replyButton.widthAnchor.constraint(equalToConstant: 44),
             replyButton.heightAnchor.constraint(equalToConstant: 44),
         ])
@@ -184,17 +186,18 @@ final class TopicDetailViewController: ObservableViewController {
             footerSpinner.stopAnimating()
         }
 
-        // Show posts progressively — only include visible (non-action) posts that have been rendered
+        // Show posts — all visible posts that have parsed blocks
         if viewModel.isReady {
             tableView.isHidden = false
             var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
             snapshot.appendSections([0])
             var seen = Set<Int>()
-            let renderedIds = viewModel.visiblePosts.compactMap { post -> Int? in
-                guard viewModel.renderedPosts[post.id] != nil, seen.insert(post.id).inserted else { return nil }
+            let readyIds = viewModel.visiblePosts.compactMap { post -> Int? in
+                guard viewModel.parsedBlocks[post.id] != nil,
+                      seen.insert(post.id).inserted else { return nil }
                 return post.id
             }
-            snapshot.appendItems(renderedIds, toSection: 0)
+            snapshot.appendItems(readyIds, toSection: 0)
             dataSource.apply(snapshot, animatingDifferences: false)
         }
     }
@@ -239,7 +242,8 @@ final class TopicDetailViewController: ObservableViewController {
 
     private func handleLink(_ url: URL) {
         guard let baseHost = URL(string: baseURL)?.host,
-              let linkHost = url.host else {
+              let linkHost = url.host
+        else {
             let safari = SFSafariViewController(url: url)
             present(safari, animated: true)
             return
@@ -269,7 +273,7 @@ final class TopicDetailViewController: ObservableViewController {
     private func parseTopicId(from url: URL) -> Int? {
         let components = url.pathComponents
         guard let tIndex = components.firstIndex(of: "t") else { return nil }
-        for i in (tIndex + 1)..<components.count {
+        for i in (tIndex + 1) ..< components.count {
             if let id = Int(components[i]) {
                 return id
             }
@@ -298,7 +302,8 @@ final class TopicDetailViewController: ObservableViewController {
         let components = url.pathComponents
         // Format: /tag/{tag_name} or /tags/{tag_name}
         if let tagIndex = components.firstIndex(where: { $0 == "tag" || $0 == "tags" }),
-           tagIndex + 1 < components.count {
+           tagIndex + 1 < components.count
+        {
             return components[tagIndex + 1]
         }
         return nil
@@ -309,19 +314,11 @@ final class TopicDetailViewController: ObservableViewController {
 
 extension TopicDetailViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        guard let postId = dataSource.itemIdentifier(for: indexPath),
-              let rendered = viewModel.renderedPosts[postId] else {
-            return UITableView.automaticDimension
-        }
-        return PostWebViewCell.headerHeight + rendered.height + PostWebViewCell.bottomBarHeight
+        UITableView.automaticDimension
     }
 
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
-        guard let postId = dataSource.itemIdentifier(for: indexPath),
-              let rendered = viewModel.renderedPosts[postId] else {
-            return 200
-        }
-        return PostWebViewCell.headerHeight + rendered.height + PostWebViewCell.bottomBarHeight
+        200
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -345,10 +342,10 @@ extension TopicDetailViewController: UITableViewDelegate {
     }
 }
 
-// MARK: - PostWebViewCellDelegate
+// MARK: - PostCellDelegate
 
-extension TopicDetailViewController: PostWebViewCellDelegate {
-    func postWebViewCell(_ cell: PostWebViewCell, didTapImageURL url: URL) {
+extension TopicDetailViewController: PostCellDelegate {
+    func postCell(didTapImageURL url: URL) {
         SDWebImageManager.shared.loadImage(with: url, progress: nil) { [weak self] image, _, _, _, _, _ in
             guard let self, let image else { return }
             let controller = LightboxController(images: [LightboxImage(image: image)])
@@ -358,11 +355,11 @@ extension TopicDetailViewController: PostWebViewCellDelegate {
         }
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapLinkURL url: URL) {
+    func postCell(didTapLinkURL url: URL) {
         handleLink(url)
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapShowRepliesForPostId postId: Int) {
+    func postCell(didTapShowRepliesForPostId postId: Int) {
         let repliesVC = RepliesViewController(api: api, postId: postId, topicId: topicId)
         if let sheet = repliesVC.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
@@ -371,21 +368,11 @@ extension TopicDetailViewController: PostWebViewCellDelegate {
         present(repliesVC, animated: true)
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapToggleDetails detailsIndex: Int, postId: Int) {
-        guard !isTogglingDetails else { return }
-        isTogglingDetails = true
-        Task {
-            await viewModel.toggleDetails(postId: postId, detailsIndex: detailsIndex, containerWidth: view.bounds.width)
-            var snapshot = dataSource.snapshot()
-            snapshot.reconfigureItems([postId])
-            await dataSource.apply(snapshot, animatingDifferences: false)
-            tableView.beginUpdates()
-            tableView.endUpdates()
-            isTogglingDetails = false
-        }
+    func postCell(didTapToggleDetails detailsIndex: Int, postId: Int) {
+        // Details toggle not supported in native rendering — no-op
     }
 
-    func postWebViewCell(_ cell: PostWebViewCell, didTapReplyToPost post: DiscourseTopicDetail.Post) {
+    func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) {
         guard let authGate = findForumContainer() else { return }
         authGate.requireAuth { [weak self] in
             guard let self else { return }

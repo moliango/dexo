@@ -1,4 +1,5 @@
 import UIKit
+import SDWebImage
 
 final class ForumListCell: UITableViewCell {
     static let reuseIdentifier = "ForumListCell"
@@ -64,24 +65,17 @@ final class ForumListCell: UITableViewCell {
     func configure(with forum: ForumInstance) {
         titleLabel.text = forum.title
         urlLabel.text = forum.baseURL
-        iconImageView.image = UIImage(systemName: "globe")
 
         if let iconURLString = forum.iconURL, let iconURL = URL(string: iconURLString) {
-            loadIcon(from: iconURL)
+            iconImageView.sd_setImage(with: iconURL, placeholderImage: UIImage(systemName: "globe"))
+        } else {
+            iconImageView.image = UIImage(systemName: "globe")
         }
-    }
-
-    private func loadIcon(from url: URL) {
-        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
-            guard let data, let image = UIImage(data: data) else { return }
-            DispatchQueue.main.async {
-                self?.iconImageView.image = image
-            }
-        }.resume()
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        iconImageView.sd_cancelCurrentImageLoad()
         iconImageView.image = UIImage(systemName: "globe")
         titleLabel.text = nil
         urlLabel.text = nil

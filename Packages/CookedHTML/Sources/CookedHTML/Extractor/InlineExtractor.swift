@@ -1,0 +1,114 @@
+import Foundation
+import SwiftSoup
+
+/// Extracts inline nodes from a DOM element's children.
+enum InlineExtractor {
+    /// Extract inline nodes from the children of the given element.
+    static func extract(from element: Element, options: ParseOptions, style: TextStyle = []) -> [InlineNode] {
+        var nodes: [InlineNode] = []
+        for child in element.getChildNodes() {
+            nodes.append(contentsOf: extractNode(child, options: options, style: style))
+        }
+        return mergeAdjacentText(nodes)
+    }
+
+    /// Extract inline nodes from a single DOM node.
+    private static func extractNode(_ node: Node, options: ParseOptions, style: TextStyle) -> [InlineNode] {
+        if let textNode = node as? TextNode {
+            let text = textNode.getWholeText()
+            if text.allSatisfy({ $0.isWhitespace }) && text.contains("\n") {
+                // Collapse pure whitespace containing newlines to a single space
+                return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? [.text(" ")] : [.text(text)]
+            }
+            if style.isEmpty {
+                return [.text(text)]
+            } else {
+                return [.styledText(text, style)]
+            }
+        }
+
+        guard let element = node as? Element else { return [] }
+        let tagName = element.tagName().lowercased()
+
+        switch tagName {
+        case "strong", "b":
+            return extract(from: element, options: options, style: style.union(.bold))
+
+        case "em", "i":
+            return extract(from: element, options: options, style: style.union(.italic))
+
+        case "s", "del":
+            return extract(from: element, options: options, style: style.union(.strikethrough))
+
+        case "a":
+            let href = resolveURL((try? element.attr("href")) ?? "", options: options)
+            let children = extract(from: element, options: options, style: style)
+            return [.link(href: href, children: children)]
+
+        case "img":
+            return extractImage(from: element, options: options)
+
+        case "code":
+            let text = (try? element.text()) ?? ""
+            return [.code(text)]
+
+        case "br":
+            return [.lineBreak]
+
+        case "span":
+            return extract(from: element, options: options, style: style)
+
+        default:
+            // For other inline elements, just recurse into children
+            return extract(from: element, options: options, style: style)
+        }
+    }
+
+    /// Extract an image inline node from an `<img>` element.
+    private static func extractImage(from element: Element, options: ParseOptions) -> [InlineNode] {
+        let src = resolveURL((try? element.attr("src")) ?? "", options: options)
+        let alt = try? element.attr("alt")
+        let width = Int((try? element.attr("width")) ?? "")
+        let height = Int((try? element.attr("height")) ?? "")
+
+        let classAttr = (try? element.attr("class")) ?? ""
+        let isEmoji = classAttr.contains("emoji")
+
+        return [.image(src: src, alt: alt, width: width, height: height, isEmoji: isEmoji)]
+    }
+
+    /// Resolve a URL using the parse options.
+    private static func resolveURL(_ url: String, options: ParseOptions) -> String {
+        URLResolver.resolve(url, baseURL: options.baseURL)
+    }
+
+    /// Merge adjacent `.text` nodes and adjacent `.styledText` nodes with the same style.
+    private static func mergeAdjacentText(_ nodes: [InlineNode]) -> [InlineNode] {
+        guard !nodes.isEmpty else { return [] }
+        var result: [InlineNode] = []
+
+        for node in nodes {
+            guard let last = result.last else {
+                result.append(node)
+                continue
+            }
+            switch (last, node) {
+            case (.text(let a), .text(let b)):
+                result[result.count - 1] = .text(a + b)
+            case (.styledText(let a, let styleA), .styledText(let b, let styleB)) where styleA == styleB:
+                result[result.count - 1] = .styledText(a + b, styleA)
+            default:
+                result.append(node)
+            }
+        }
+
+        // Remove empty text nodes
+        return result.filter { node in
+            switch node {
+            case .text(let t) where t.isEmpty: return false
+            case .styledText(let t, _) where t.isEmpty: return false
+            default: return true
+            }
+        }
+    }
+}

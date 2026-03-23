@@ -15,7 +15,10 @@
       "WebFetch(domain:riyazali.net)",
       "WebFetch(domain:meta.discourse.org)",
       "WebFetch(domain:github.com)",
-      "Bash(make setup:*)"
+      "Bash(make setup:*)",
+      "Bash(swift build)",
+      "Bash(ls:*)",
+      "Bash(tuist version:*)"
     ]
   }
 }

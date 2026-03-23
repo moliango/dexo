@@ -1,25 +1,17 @@
-import UIKit
+import CookedHTML
 import SDWebImage
+import UIKit
 
-protocol PostCellDelegate: AnyObject {
-    func postCell(didTapImageURL url: URL)
-    func postCell(didTapLinkURL url: URL)
-    func postCell(didTapShowRepliesForPostId postId: Int)
-    func postCell(didTapToggleDetails detailsIndex: Int, postId: Int)
-    func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post)
-}
-
-final class PostWebViewCell: UITableViewCell {
-    static let reuseIdentifier = "PostWebViewCell"
+final class PostNativeCell: UITableViewCell {
+    static let reuseIdentifier = "PostNativeCell"
     static let headerHeight: CGFloat = 44
     static let bottomBarHeight: CGFloat = 30
 
     weak var delegate: PostCellDelegate?
-    private var interactiveRegions: [InteractiveRegion] = []
     private var postId: Int = 0
     private var postLink: String?
     private var currentPost: DiscourseTopicDetail.Post?
-    private var codeBlockViews: [UIScrollView] = []
+    private var cookedHTML: String = ""
 
     // MARK: - Header UI
 
@@ -56,6 +48,16 @@ final class PostWebViewCell: UITableViewCell {
         return label
     }()
 
+    private let sourceButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        button.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.isHidden = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
     private let replyToLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 12)
@@ -67,13 +69,12 @@ final class PostWebViewCell: UITableViewCell {
 
     // MARK: - Content
 
-    private let snapshotImageView: UIImageView = {
-        let iv = UIImageView()
-        iv.contentMode = .scaleToFill
-        iv.clipsToBounds = true
-        iv.isUserInteractionEnabled = true
-        iv.translatesAutoresizingMaskIntoConstraints = false
-        return iv
+    private let contentStackView: UIStackView = {
+        let sv = UIStackView()
+        sv.axis = .vertical
+        sv.spacing = 8
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
     }()
 
     // MARK: - Bottom Bar
@@ -113,14 +114,13 @@ final class PostWebViewCell: UITableViewCell {
         return view
     }()
 
-    private var imageViewHeightConstraint: NSLayoutConstraint?
-
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         selectionStyle = .none
         setupViews()
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -130,8 +130,9 @@ final class PostWebViewCell: UITableViewCell {
         contentView.addSubview(usernameLabel)
         contentView.addSubview(timeLabel)
         contentView.addSubview(floorLabel)
+        contentView.addSubview(sourceButton)
         contentView.addSubview(replyToLabel)
-        contentView.addSubview(snapshotImageView)
+        contentView.addSubview(contentStackView)
         contentView.addSubview(showRepliesButton)
         contentView.addSubview(replyButton)
         contentView.addSubview(copyLinkButton)
@@ -152,24 +153,29 @@ final class PostWebViewCell: UITableViewCell {
             replyToLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
             replyToLabel.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -8),
 
+            sourceButton.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
+            sourceButton.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -6),
+            sourceButton.widthAnchor.constraint(equalToConstant: 24),
+            sourceButton.heightAnchor.constraint(equalToConstant: 24),
+
             floorLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
             floorLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
 
-            snapshotImageView.topAnchor.constraint(equalTo: avatarImageView.bottomAnchor),
-            snapshotImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            snapshotImageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            contentStackView.topAnchor.constraint(equalTo: avatarImageView.bottomAnchor, constant: 8),
+            contentStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            contentStackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
 
-            showRepliesButton.topAnchor.constraint(equalTo: snapshotImageView.bottomAnchor),
+            showRepliesButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
             showRepliesButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             showRepliesButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
 
-            copyLinkButton.topAnchor.constraint(equalTo: snapshotImageView.bottomAnchor),
+            copyLinkButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
             copyLinkButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
             copyLinkButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
             copyLinkButton.widthAnchor.constraint(equalToConstant: 28),
             copyLinkButton.bottomAnchor.constraint(equalTo: separatorLine.topAnchor, constant: -6),
 
-            replyButton.topAnchor.constraint(equalTo: snapshotImageView.bottomAnchor),
+            replyButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
             replyButton.trailingAnchor.constraint(equalTo: copyLinkButton.leadingAnchor),
             replyButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
             replyButton.widthAnchor.constraint(equalToConstant: 28),
@@ -180,34 +186,32 @@ final class PostWebViewCell: UITableViewCell {
             separatorLine.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
         ])
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
-        snapshotImageView.addGestureRecognizer(tap)
-
         showRepliesButton.addTarget(self, action: #selector(repliesButtonTapped), for: .touchUpInside)
         copyLinkButton.addTarget(self, action: #selector(copyLinkTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
+        sourceButton.addTarget(self, action: #selector(sourceButtonTapped), for: .touchUpInside)
     }
 
     func configure(
         with post: DiscourseTopicDetail.Post,
-        snapshot: UIImage?,
-        contentHeight: CGFloat,
-        interactiveRegions: [InteractiveRegion],
-        codeBlocks: [CodeBlockInfo],
-        baseURL: String,
+        annotatedBlocks: [AnnotatedBlock],
+        config: NativeRenderConfig,
         delegate: PostCellDelegate?,
         floorNumber: Int,
-        postLink: String?
+        postLink: String?,
+        baseURL: String,
+        hasUnsupportedBlocks: Bool,
+        cookedHTML: String
     ) {
-        self.postId = post.id
+        postId = post.id
         self.postLink = postLink
-        self.currentPost = post
+        currentPost = post
+        self.delegate = delegate
+        self.cookedHTML = cookedHTML
+        sourceButton.isHidden = !hasUnsupportedBlocks
+
         usernameLabel.text = post.username
         timeLabel.text = Self.formatDate(post.createdAt)
-        snapshotImageView.image = snapshot
-        self.interactiveRegions = interactiveRegions
-        self.delegate = delegate
-
         floorLabel.text = "#\(floorNumber)"
 
         if let replyUser = post.replyToUser {
@@ -228,13 +232,13 @@ final class PostWebViewCell: UITableViewCell {
             showRepliesButton.setTitle("▼ \(post.replyCount) 条回复", for: .normal)
         }
 
-        imageViewHeightConstraint?.isActive = false
-        let hc = snapshotImageView.heightAnchor.constraint(equalToConstant: contentHeight)
-        imageViewHeightConstraint = hc
-        hc.isActive = true
-
-        // Overlay scrollable code blocks
-        setupCodeBlockOverlays(codeBlocks)
+        // Render content blocks
+        contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let views = NativeContentRenderer.renderBlocks(annotatedBlocks, config: config, delegate: delegate)
+        for view in views {
+            setupTextViews(in: view)
+            contentStackView.addArrangedSubview(view)
+        }
 
         if let template = post.avatarTemplate {
             let sized = template.replacingOccurrences(of: "{size}", with: "96")
@@ -245,68 +249,60 @@ final class PostWebViewCell: UITableViewCell {
         }
     }
 
-    // MARK: - Code Block Overlays
+    // MARK: - View Setup
 
-    private func setupCodeBlockOverlays(_ codeBlocks: [CodeBlockInfo]) {
-        codeBlockViews.forEach { $0.removeFromSuperview() }
-        codeBlockViews = []
-
-        let codeFont = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
-        let codeBg = UIColor { $0.userInterfaceStyle == .dark
-            ? UIColor(white: 0.165, alpha: 1)
-            : UIColor(white: 0.957, alpha: 1)
+    private func setupTextViews(in view: UIView) {
+        if let textView = view as? UITextView {
+            textView.delegate = self
+            loadInlineImages(in: textView)
+            return
         }
-
-        for block in codeBlocks {
-            let sv = UIScrollView(frame: block.frame)
-            sv.showsHorizontalScrollIndicator = true
-            sv.showsVerticalScrollIndicator = false
-            sv.bounces = false
-            sv.backgroundColor = codeBg
-            sv.layer.cornerRadius = 6
-            sv.clipsToBounds = true
-
-            let label = UILabel()
-            label.text = block.text
-            label.font = codeFont
-            label.textColor = .label
-            label.numberOfLines = 0
-            label.lineBreakMode = .byClipping
-
-            let padding: CGFloat = 10
-            let textSize = (block.text as NSString).boundingRect(
-                with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
-                options: [.usesLineFragmentOrigin],
-                attributes: [.font: codeFont],
-                context: nil
-            ).size
-            label.frame = CGRect(x: padding, y: padding, width: ceil(textSize.width), height: ceil(textSize.height))
-            sv.addSubview(label)
-            sv.contentSize = CGSize(width: ceil(textSize.width) + padding * 2, height: block.frame.height)
-
-            snapshotImageView.addSubview(sv)
-            codeBlockViews.append(sv)
+        for subview in view.subviews {
+            setupTextViews(in: subview)
         }
     }
 
-    // MARK: - Tap Handling
+    // MARK: - Inline Image Loading
 
-    @objc private func handleTap(_ gesture: UITapGestureRecognizer) {
-        let location = gesture.location(in: snapshotImageView)
-        for region in interactiveRegions {
-            if region.frame.contains(location) {
-                switch region.kind {
-                case .image(let url):
-                    delegate?.postCell(didTapImageURL: url)
-                case .link(let url):
-                    delegate?.postCell(didTapLinkURL: url)
-                case .details(let index):
-                    delegate?.postCell(didTapToggleDetails: index, postId: postId)
+    private func loadInlineImages(in textView: UITextView) {
+        guard let attrText = textView.attributedText else { return }
+        let full = NSRange(location: 0, length: attrText.length)
+
+        // Collect all (attachment, location, url, isEmoji) first — enumerateAttribute merges
+        // adjacent characters that share the same URL into one range, so we must
+        // iterate character-by-character inside each range.
+        var entries: [(attachment: NSTextAttachment, location: Int, url: URL, isEmoji: Bool)] = []
+        attrText.enumerateAttribute(.cookedHTMLImageURL, in: full) { value, range, _ in
+            guard let urlString = value as? String,
+                  let url = URL(string: urlString) else { return }
+            for i in 0 ..< range.length {
+                let loc = range.location + i
+                if let attachment = attrText.attribute(.attachment, at: loc, effectiveRange: nil) as? NSTextAttachment {
+                    // Emoji attachments have zero-size bounds initially; non-emoji have sized bounds
+                    let isEmoji = attachment.bounds.width == 0 && attachment.bounds.height == 0
+                    entries.append((attachment, loc, url, isEmoji))
                 }
-                return
+            }
+        }
+
+        let emojiSize: CGFloat = 20
+        for entry in entries {
+            SDWebImageManager.shared.loadImage(with: entry.url, progress: nil) { [weak textView] image, _, _, _, _, _ in
+                guard let textView, let image else { return }
+                if entry.isEmoji {
+                    entry.attachment.image = image
+                    entry.attachment.bounds = CGRect(x: 0, y: -3, width: emojiSize, height: emojiSize)
+                } else {
+                    entry.attachment.image = image
+                    // Keep the bounds already set by the attributed string builder
+                }
+                let charRange = NSRange(location: entry.location, length: 1)
+                textView.textStorage.edited(.editedAttributes, range: charRange, changeInLength: 0)
             }
         }
     }
+
+    // MARK: - Actions
 
     @objc private func repliesButtonTapped() {
         delegate?.postCell(didTapShowRepliesForPostId: postId)
@@ -329,14 +325,33 @@ final class PostWebViewCell: UITableViewCell {
         }
     }
 
+    @objc private func sourceButtonTapped() {
+        UIPasteboard.general.string = cookedHTML
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        sourceButton.setImage(UIImage(systemName: "checkmark", withConfiguration: config), for: .normal)
+        sourceButton.tintColor = .systemGreen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.sourceButton.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
+            self?.sourceButton.tintColor = .tertiaryLabel
+        }
+    }
+
     override func prepareForReuse() {
         super.prepareForReuse()
-        snapshotImageView.image = nil
-        interactiveRegions = []
+        // Cancel block-level image loads and fallback renders
+        for view in contentStackView.arrangedSubviews {
+            if let container = view as? TappableImageContainer {
+                container.cancelImageLoad()
+            } else if let fallback = view as? FallbackBlockView {
+                fallback.cancelRender()
+            }
+        }
+        contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
         delegate = nil
         postId = 0
         postLink = nil
         currentPost = nil
+        cookedHTML = ""
         usernameLabel.text = nil
         timeLabel.text = nil
         floorLabel.text = nil
@@ -344,13 +359,14 @@ final class PostWebViewCell: UITableViewCell {
         replyToLabel.text = nil
         replyToLabel.isHidden = true
         showRepliesButton.isHidden = true
+        sourceButton.isHidden = true
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
-        codeBlockViews.forEach { $0.removeFromSuperview() }
-        codeBlockViews = []
         let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         copyLinkButton.setImage(UIImage(systemName: "link", withConfiguration: config), for: .normal)
         copyLinkButton.tintColor = .tertiaryLabel
+        sourceButton.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
+        sourceButton.tintColor = .tertiaryLabel
     }
 
     private static func formatDate(_ isoString: String) -> String {
@@ -360,5 +376,14 @@ final class PostWebViewCell: UITableViewCell {
         let relative = RelativeDateTimeFormatter()
         relative.unitsStyle = .abbreviated
         return relative.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - UITextViewDelegate
+
+extension PostNativeCell: UITextViewDelegate {
+    func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        delegate?.postCell(didTapLinkURL: URL)
+        return false
     }
 }

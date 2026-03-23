@@ -84,6 +84,12 @@ final class PostContentRenderer: NSObject {
         return await renderSinglePost(html: html, baseURL: baseURL, width: width)
     }
 
+    /// Render a single HTML block fragment (used by FallbackBlockView for unsupported blocks).
+    func renderHTMLBlock(html: String, baseURL: String, width: CGFloat) async -> RenderedPost {
+        let fullHTML = Self.buildHTML(cooked: html, baseURL: baseURL, isDark: Self.isDarkMode)
+        return await renderSinglePost(html: fullHTML, baseURL: baseURL, width: width)
+    }
+
     private func renderSinglePost(html: String, baseURL: String, width: CGFloat) async -> RenderedPost {
         await withCheckedContinuation { continuation in
             let webView = WKWebView(frame: CGRect(x: 0, y: 0, width: width, height: 1))
@@ -439,17 +445,23 @@ private final class RenderDelegate: NSObject, WKNavigationDelegate {
                     height = 100
                 }
 
-                // Step 2: Resize webView to actual content height
-                webView.frame.size.height = height
+                // Step 2: Resize webView to actual content height (pixel-aligned)
+                let scale = UIScreen.main.scale
+                let pixelHeight = ceil(height * scale) / scale
+                webView.frame.size.height = pixelHeight
 
                 // Step 3: Extract interactive regions and code blocks
                 webView.evaluateJavaScript(Self.regionExtractionJS) { [self] regionResult, _ in
                     let (regions, codeBlocks) = Self.parseResult(regionResult)
 
                     // Step 4: Take snapshot
-                    webView.takeSnapshot(with: nil) { [self] image, _ in
+                    let snapshotConfig = WKSnapshotConfiguration()
+                    snapshotConfig.rect = CGRect(origin: .zero, size: webView.bounds.size)
+                    webView.takeSnapshot(with: snapshotConfig) { [self] image, _ in
+                        // Use the snapshot's actual point height to avoid scaleToFill distortion
+                        let finalHeight = image?.size.height ?? pixelHeight
                         self.complete(with: PostContentRenderer.RenderedPost(
-                            height: height,
+                            height: finalHeight,
                             snapshot: image,
                             interactiveRegions: regions,
                             codeBlocks: codeBlocks
