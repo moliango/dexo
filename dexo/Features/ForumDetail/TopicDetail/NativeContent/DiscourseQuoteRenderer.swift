@@ -4,21 +4,20 @@ import UIKit
 
 enum DiscourseQuoteRenderer: BlockRenderer {
     static func canRender(_ block: ContentBlock) -> Bool {
-        guard case .discourseQuote(_, _, let content) = block else { return false }
+        guard case .discourseQuote(_, _, _, _, _, _, let content) = block else { return false }
         return NativeContentRenderer.canRenderNatively(content)
     }
 
     static func render(_ block: ContentBlock, config: NativeRenderConfig, delegate: PostCellDelegate?) -> UIView {
-        guard case .discourseQuote(let username, let avatarURL, let content) = block else {
+        guard case .discourseQuote(let username, let avatarURL, let topicTitle, let topicURL, let categoryName, let categoryURL, let content) = block else {
             return UIView()
         }
 
         let container = UIView()
         container.translatesAutoresizingMaskIntoConstraints = false
         container.backgroundColor = .secondarySystemBackground
-//        container.layer.cornerRadius = 8
 
-        // Header: avatar + username
+        // Header: avatar + (username OR topic title + category badge)
         let headerStack = UIStackView()
         headerStack.axis = .horizontal
         headerStack.spacing = 6
@@ -44,7 +43,37 @@ enum DiscourseQuoteRenderer: BlockRenderer {
             avatarImageView.sd_setImage(with: url)
         }
 
-        if let username, !username.isEmpty {
+        if let topicTitle, !topicTitle.isEmpty {
+            // Topic-link variant: title button + optional category badge
+            let titleButton = UIButton(type: .system)
+            titleButton.setTitle(topicTitle, for: .normal)
+            titleButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+            titleButton.titleLabel?.lineBreakMode = .byTruncatingTail
+            titleButton.setTitleColor(.link, for: .normal)
+            titleButton.contentHorizontalAlignment = .leading
+            titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            if let topicURL, let url = URL(string: topicURL) {
+                titleButton.addAction(UIAction { _ in
+                    delegate?.postCell(didTapLinkURL: url)
+                }, for: .touchUpInside)
+            }
+            headerStack.addArrangedSubview(titleButton)
+
+            if let categoryName, !categoryName.isEmpty {
+                let badge = CategoryBadgeView(name: categoryName)
+                badge.setContentHuggingPriority(.required, for: .horizontal)
+                badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+                if let categoryURL, let url = URL(string: categoryURL) {
+                    let tap = UITapGestureRecognizer()
+                    badge.addGestureRecognizer(tap)
+                    badge.isUserInteractionEnabled = true
+                    tap.addTarget(badge, action: #selector(CategoryBadgeView.handleTap))
+                    badge.tapAction = { delegate?.postCell(didTapLinkURL: url) }
+                }
+                headerStack.addArrangedSubview(badge)
+            }
+        } else if let username, !username.isEmpty {
+            // Username variant (existing behavior)
             let nameLabel = UILabel()
             nameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
             nameLabel.textColor = .secondaryLabel
@@ -97,5 +126,43 @@ enum DiscourseQuoteRenderer: BlockRenderer {
         ])
 
         return container
+    }
+}
+
+// MARK: - Category Badge
+
+private class CategoryBadgeView: UIView {
+    var tapAction: (() -> Void)?
+
+    init(name: String) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let label = UILabel()
+        label.text = name
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabel
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        backgroundColor = .tertiarySystemBackground
+        layer.cornerRadius = 3
+        layer.borderWidth = 1
+        layer.borderColor = UIColor.separator.cgColor
+
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: topAnchor, constant: 2),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc func handleTap() {
+        tapAction?()
     }
 }

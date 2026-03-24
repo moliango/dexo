@@ -101,7 +101,7 @@ final class BlockExtractorTests: XCTestCase {
         let html = "<p><img src=\"/uploads/test.png\" alt=\"test\" width=\"100\" height=\"50\"></p>"
         let blocks = CookedHTMLParser.parse(html: html)
         XCTAssertEqual(blocks.count, 1)
-        if case .image(let src, let alt, let w, let h) = blocks[0] {
+        if case .image(let src, let alt, let w, let h, _) = blocks[0] {
             XCTAssertEqual(src, "/uploads/test.png")
             XCTAssertEqual(alt, "test")
             XCTAssertEqual(w, 100)
@@ -114,7 +114,7 @@ final class BlockExtractorTests: XCTestCase {
     func testImageWithBaseURL() {
         let html = "<p><img src=\"/uploads/test.png\"></p>"
         let blocks = CookedHTMLParser.parse(html: html, baseURL: "https://linux.do")
-        if case .image(let src, _, _, _) = blocks[0] {
+        if case .image(let src, _, _, _, _) = blocks[0] {
             XCTAssertEqual(src, "https://linux.do/uploads/test.png")
         } else {
             XCTFail("Expected image")

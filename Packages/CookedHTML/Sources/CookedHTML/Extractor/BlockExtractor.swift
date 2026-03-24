@@ -20,7 +20,7 @@ enum BlockExtractor {
         for child in parent.getChildNodes() {
             blocks.append(contentsOf: extractNode(child, options: options))
         }
-        return blocks.compactMap { trimBlock($0) }
+        return mergeInlineImageBlocks(blocks).compactMap { trimBlock($0) }
     }
 
     /// Extract annotated blocks (block + source HTML) from a parent element's children.
@@ -47,7 +47,10 @@ enum BlockExtractor {
     /// Extract content blocks from a single DOM node.
     private static func extractNode(_ node: Node, options: ParseOptions) -> [ContentBlock] {
         if let textNode = node as? TextNode {
-            let text = textNode.getWholeText().trimmingCharacters(in: .whitespacesAndNewlines)
+            let raw = textNode.getWholeText()
+            // Trim leading whitespace/newlines but preserve meaningful trailing spaces
+            // (they serve as word separators when adjacent inline elements are merged).
+            let text = raw.replacingOccurrences(of: "^[\\s]+", with: "", options: .regularExpression)
             if text.isEmpty { return [] }
             return [.paragraph([.text(text)])]
         }
@@ -117,21 +120,29 @@ enum BlockExtractor {
         let children = element.children()
         if children.size() == 1,
            let onlyChild = children.first(),
-           onlyChild.tagName().lowercased() == "img",
            element.textNodes().allSatisfy({ $0.getWholeText().trimmingCharacters(in: .whitespacesAndNewlines).isEmpty })
         {
-            return extractBlockImage(from: onlyChild, options: options)
-        }
+            let childTag = onlyChild.tagName().lowercased()
 
-        // Check if paragraph contains a link wrapping a single image
-        if children.size() == 1,
-           let onlyChild = children.first(),
-           onlyChild.tagName().lowercased() == "a",
-           onlyChild.children().size() == 1,
-           let innerImg = onlyChild.children().first(),
-           innerImg.tagName().lowercased() == "img"
-        {
-            return extractBlockImage(from: innerImg, options: options)
+            // <p><img></p>
+            if childTag == "img" {
+                return extractBlockImage(from: onlyChild, options: options)
+            }
+
+            // <p><a><img></a></p>
+            if childTag == "a",
+               onlyChild.children().size() == 1,
+               let innerImg = onlyChild.children().first(),
+               innerImg.tagName().lowercased() == "img"
+            {
+                let href = URLResolver.resolve((try? onlyChild.attr("href")) ?? "", baseURL: options.baseURL)
+                return extractBlockImage(from: innerImg, options: options, href: href.isEmpty ? nil : href)
+            }
+
+            // <p><div class="lightbox-wrapper">...</div></p>
+            if childTag == "div" || childTag == "figure" {
+                return extractDiv(from: onlyChild, options: options)
+            }
         }
 
         let inlines = InlineExtractor.extract(from: element, options: options)
@@ -175,7 +186,7 @@ enum BlockExtractor {
         let summaryEl = element.children().first { $0.tagName().lowercased() == "summary" }
         let summaryInlines: [InlineNode]
         if let summaryEl {
-            summaryInlines = InlineExtractor.extract(from: summaryEl, options: options)
+            summaryInlines = InlineExtractor.extract(from: summaryEl, options: options).trimmedWhitespace()
         } else {
             summaryInlines = [.text("Details")]
         }
@@ -190,25 +201,82 @@ enum BlockExtractor {
         return [.details(summary: summaryInlines, content: contentBlocks)]
     }
 
-    private static func extractBlockImage(from element: Element, options: ParseOptions) -> [ContentBlock] {
+    private static func extractBlockImage(from element: Element, options: ParseOptions, href: String? = nil) -> [ContentBlock] {
         let src = URLResolver.resolve((try? element.attr("src")) ?? "", baseURL: options.baseURL)
         let alt = try? element.attr("alt")
         let width = Int((try? element.attr("width")) ?? "")
         let height = Int((try? element.attr("height")) ?? "")
-        return [.image(src: src, alt: alt, width: width, height: height)]
+        return [.image(src: src, alt: alt, width: width, height: height, href: href)]
     }
 
     private static func extractDiv(from element: Element, options: ParseOptions) -> [ContentBlock] {
+        let classAttr = (try? element.attr("class")) ?? ""
+
         // Lightbox wrapper
-        if let classAttr = try? element.attr("class"), classAttr.contains("lightbox-wrapper") {
+        if classAttr.contains("lightbox-wrapper") {
             if let img = try? element.select("img").first() {
-                return extractBlockImage(from: img, options: options)
+                let href: String? = {
+                    guard let anchor = try? element.select("a").first() else { return nil }
+                    let h = URLResolver.resolve((try? anchor.attr("href")) ?? "", baseURL: options.baseURL)
+                    return h.isEmpty ? nil : h
+                }()
+                return extractBlockImage(from: img, options: options, href: href)
             }
         }
+
+        // Video embed (youtube-onebox, lazy-video-container, etc.)
+        if classAttr.contains("lazy-video-container") || classAttr.contains("video-container") {
+            return extractVideo(from: element, options: options)
+        }
+
         // Generic div — recurse into children
         let inner = extract(from: element, options: options)
         if inner.isEmpty { return [] }
         return inner
+    }
+
+    private static func extractVideo(from element: Element, options: ParseOptions) -> [ContentBlock] {
+        let videoId = (try? element.attr("data-video-id")) ?? ""
+        let title: String? = {
+            let t = (try? element.attr("data-video-title")) ?? ""
+            return t.isEmpty ? nil : t
+        }()
+        let provider: String? = {
+            let p = (try? element.attr("data-provider-name")) ?? ""
+            return p.isEmpty ? nil : p
+        }()
+
+        // URL from <a> href
+        let url: String = {
+            if let anchor = try? element.select("a").first() {
+                let href = (try? anchor.attr("href")) ?? ""
+                if !href.isEmpty { return href }
+            }
+            return ""
+        }()
+
+        // Thumbnail from <img>
+        var thumbnailURL: String?
+        var width: Int?
+        var height: Int?
+        if let img = try? element.select("img").first() {
+            let src = (try? img.attr("src")) ?? ""
+            if !src.isEmpty {
+                thumbnailURL = URLResolver.resolve(src, baseURL: options.baseURL)
+            }
+            if let w = try? img.attr("width"), let wInt = Int(w) { width = wInt }
+            if let h = try? img.attr("height"), let hInt = Int(h) { height = hInt }
+        }
+
+        return [.video(
+            url: url,
+            thumbnailURL: thumbnailURL,
+            title: title,
+            width: width,
+            height: height,
+            videoId: videoId.isEmpty ? nil : videoId,
+            provider: provider
+        )]
     }
 
     // MARK: - Helpers
@@ -232,5 +300,25 @@ enum BlockExtractor {
         default:
             return block
         }
+    }
+
+    /// Merge small emoji-sized `.image` blocks that immediately follow a `.paragraph`
+    /// back into that paragraph as inline image nodes.
+    /// This handles cases where text + emoji `<img>` are siblings without `<p>` wrapping.
+    private static func mergeInlineImageBlocks(_ blocks: [ContentBlock]) -> [ContentBlock] {
+        guard blocks.count > 1 else { return blocks }
+        var result: [ContentBlock] = []
+        for block in blocks {
+            if case .image(let src, let alt, let w, let h, _) = block,
+               let w, let h, w <= 80, h <= 80,
+               let lastIndex = result.indices.last,
+               case .paragraph(let inlines) = result[lastIndex]
+            {
+                result[lastIndex] = .paragraph(inlines + [.image(src: src, alt: alt, width: w, height: h, isEmoji: true)])
+            } else {
+                result.append(block)
+            }
+        }
+        return result
     }
 }

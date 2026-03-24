@@ -18,7 +18,7 @@ final class IntegrationTests: XCTestCase {
         """
         let blocks = CookedHTMLParser.parse(html: html, baseURL: "https://linux.do")
         XCTAssertEqual(blocks.count, 1)
-        if case .discourseQuote(let username, let avatarURL, let content) = blocks[0] {
+        if case .discourseQuote(let username, let avatarURL, _, _, _, _, let content) = blocks[0] {
             XCTAssertEqual(username, "john")
             XCTAssertNotNil(avatarURL)
             XCTAssertTrue(avatarURL?.contains("john") ?? false)
@@ -73,6 +73,77 @@ final class IntegrationTests: XCTestCase {
             XCTAssertEqual(rows[0].count, 2)
         } else {
             XCTFail("Expected table, got \(blocks[0])")
+        }
+    }
+
+    // MARK: - md-table wrapper
+
+    func testMdTableWrapper() {
+        let html = """
+        <div class="md-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Feature</th>
+                        <th>Description</th>
+                        <th>Link</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Bold Feature</strong></td>
+                        <td>A <em>fancy</em> description</td>
+                        <td><a href="https://example.com">Visit</a></td>
+                    </tr>
+                    <tr>
+                        <td><img src="/uploads/icon.png" alt="icon"></td>
+                        <td>Row with image</td>
+                        <td>Plain text</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        """
+        let blocks = CookedHTMLParser.parse(html: html, baseURL: "https://linux.do")
+        XCTAssertEqual(blocks.count, 1, "md-table div should produce a single .table block")
+
+        guard case .table(let headers, let rows) = blocks[0] else {
+            XCTFail("Expected .table, got \(blocks[0])")
+            return
+        }
+
+        // Headers
+        XCTAssertEqual(headers.count, 3)
+        if case .text(let t) = headers[0].first {
+            XCTAssertEqual(t, "Feature")
+        } else {
+            XCTFail("Expected text header")
+        }
+
+        // Rows
+        XCTAssertEqual(rows.count, 2)
+        XCTAssertEqual(rows[0].count, 3)
+        XCTAssertEqual(rows[1].count, 3)
+
+        // First row, first cell: bold text
+        if case .styledText(let t, .bold) = rows[0][0].first {
+            XCTAssertEqual(t, "Bold Feature")
+        } else {
+            XCTFail("Expected bold text in row 0 col 0, got \(rows[0][0])")
+        }
+
+        // First row, third cell: link
+        if case .link(let href, _) = rows[0][2].first {
+            XCTAssertEqual(href, "https://example.com")
+        } else {
+            XCTFail("Expected link in row 0 col 2, got \(rows[0][2])")
+        }
+
+        // Second row, first cell: image with resolved URL
+        if case .image(let src, _, _, _, _) = rows[1][0].first {
+            XCTAssertTrue(src.hasPrefix("https://linux.do"), "Image src should be resolved to absolute URL")
+        } else {
+            XCTFail("Expected image in row 1 col 0, got \(rows[1][0])")
         }
     }
 

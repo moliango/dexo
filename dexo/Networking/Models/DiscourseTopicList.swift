@@ -42,6 +42,7 @@ struct DiscourseTopicList: Decodable {
 
     struct Topic: Decodable, Identifiable {
         let id: Int
+        let fancyTitle: String
         let title: String
         let postsCount: Int
         let replyCount: Int
@@ -55,6 +56,7 @@ struct DiscourseTopicList: Decodable {
 
         enum CodingKeys: String, CodingKey {
             case id, title, views, pinned, excerpt, posters
+            case fancyTitle = "fancy_title"
             case postsCount = "posts_count"
             case replyCount = "reply_count"
             case categoryId = "category_id"

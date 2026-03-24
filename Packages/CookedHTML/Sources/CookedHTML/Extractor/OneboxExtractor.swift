@@ -11,6 +11,13 @@ enum OneboxExtractor {
             return href.isEmpty ? nil : URLResolver.resolve(href, baseURL: options.baseURL)
         }()
 
+        // Favicon from header img
+        let faviconURL: String? = {
+            guard let img = try? element.select("header img").first() else { return nil }
+            let src = (try? img.attr("src")) ?? ""
+            return src.isEmpty ? nil : URLResolver.resolve(src, baseURL: options.baseURL)
+        }()
+
         // Title from h3 or h4 in .onebox-body, or article title
         let title: String? = {
             if let h = try? element.select(".onebox-body h3").first() ?? element.select(".onebox-body h4").first() {
@@ -26,20 +33,35 @@ enum OneboxExtractor {
             return text.isEmpty ? nil : text
         }()
 
-        // Image from img in .onebox-body or .thumbnail
-        let imageURL: String? = {
-            let selectors = [".onebox-body img", ".thumbnail img", "img"]
-            for selector in selectors {
-                if let img = try? element.select(selector).first() {
-                    let src = (try? img.attr("src")) ?? ""
-                    if !src.isEmpty {
-                        return URLResolver.resolve(src, baseURL: options.baseURL)
-                    }
+        // Content image from .onebox-body img or .thumbnail img only.
+        // Skip small inline images (avatars, icons) — they have explicit small dimensions
+        // or classes like onebox-avatar-inline / github-icon.
+        var imageURL: String?
+        var imageWidth: Int?
+        var imageHeight: Int?
+        let selectors = [".onebox-body img", ".thumbnail img"]
+        outer: for selector in selectors {
+            guard let imgs = try? element.select(selector) else { continue }
+            for img in imgs {
+                let cls = (try? img.attr("class")) ?? ""
+                if cls.contains("avatar") || cls.contains("icon") || cls.contains("emoji") {
+                    continue
+                }
+                let w = Int((try? img.attr("width")) ?? "")
+                let h = Int((try? img.attr("height")) ?? "")
+                if let w, let h, w <= 80, h <= 80 {
+                    continue
+                }
+                let src = (try? img.attr("src")) ?? ""
+                if !src.isEmpty {
+                    imageURL = URLResolver.resolve(src, baseURL: options.baseURL)
+                    imageWidth = w
+                    imageHeight = h
+                    break outer
                 }
             }
-            return nil
-        }()
+        }
 
-        return .onebox(sourceURL: sourceURL, title: title, description: description, imageURL: imageURL)
+        return .onebox(sourceURL: sourceURL, title: title, description: description, imageURL: imageURL, imageWidth: imageWidth, imageHeight: imageHeight, faviconURL: faviconURL)
     }
 }

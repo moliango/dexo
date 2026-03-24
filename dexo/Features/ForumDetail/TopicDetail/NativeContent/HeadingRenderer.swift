@@ -31,10 +31,18 @@ enum HeadingRenderer: BlockRenderer {
             baseURL: config.baseURL
         )
 
-        let label = UILabel()
-        label.numberOfLines = 0
-        label.attributedText = inlines.attributedString(config: headingConfig.attributedStringConfig)
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
+        let textView = LinkTextView()
+        textView.isEditable = false
+        textView.isScrollEnabled = false
+        textView.textContainerInset = .zero
+        textView.textContainer.lineFragmentPadding = 0
+        textView.backgroundColor = .clear
+        textView.dataDetectorTypes = []
+        textView.attributedText = inlines.attributedString(config: headingConfig.attributedStringConfig)
+        textView.linkTextAttributes = [
+            .foregroundColor: config.linkColor,
+        ]
+        textView.translatesAutoresizingMaskIntoConstraints = false
+        return textView
     }
 }

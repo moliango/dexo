@@ -1,5 +1,5 @@
-import UIKit
 import SDWebImage
+import UIKit
 
 final class TopicCell: UITableViewCell {
     static let reuseIdentifier = "TopicCell"
@@ -56,6 +56,7 @@ final class TopicCell: UITableViewCell {
         setupUI()
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -98,7 +99,7 @@ final class TopicCell: UITableViewCell {
         categoryName: String?,
         categoryColor: UIColor?
     ) {
-        titleLabel.text = topic.title
+        titleLabel.text = topic.fancyTitle
 
         // Reply count with gray→orange color
         let replies = max(topic.postsCount - 1, 0)
@@ -151,9 +152,9 @@ final class TopicCell: UITableViewCell {
         // 0 → gray, 50+ → orange, linear in between
         let t = min(CGFloat(count) / 50.0, 1.0)
         return UIColor(
-            red: 0.55 + t * 0.45,    // 0.55 → 1.0
-            green: 0.55 - t * 0.05,   // 0.55 → 0.50
-            blue: 0.58 - t * 0.58,    // 0.58 → 0.0
+            red: 0.55 + t * 0.45, // 0.55 → 1.0
+            green: 0.55 - t * 0.05, // 0.55 → 0.50
+            blue: 0.58 - t * 0.58, // 0.58 → 0.0
             alpha: 1.0
         )
     }

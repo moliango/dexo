@@ -52,6 +52,10 @@ enum NativeContentRenderer {
         ImageRenderer.self,
         CodeBlockRenderer.self,
         DiscourseQuoteRenderer.self,
+        DetailsRenderer.self,
+        OneboxRenderer.self,
+        VideoRenderer.self,
+        TableRenderer.self,
     ]
 
     static func canRenderNatively(_ blocks: [ContentBlock]) -> Bool {

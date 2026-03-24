@@ -1,5 +1,5 @@
-import UIKit
 import CookedHTML
+import UIKit
 
 enum ListRenderer: BlockRenderer {
     static func canRender(_ block: ContentBlock) -> Bool {
@@ -13,8 +13,12 @@ enum ListRenderer: BlockRenderer {
         let result = NSMutableAttributedString()
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.paragraphSpacing = 4
-        paragraphStyle.headIndent = 20
+        paragraphStyle.headIndent = 12
         paragraphStyle.firstLineHeadIndent = 0
+
+        let tabStop = NSTextTab(textAlignment: .left, location: 12, options: [:])
+        paragraphStyle.tabStops = [tabStop]
+        paragraphStyle.defaultTabInterval = 12
 
         for (index, item) in items.enumerated() {
             let bullet: String

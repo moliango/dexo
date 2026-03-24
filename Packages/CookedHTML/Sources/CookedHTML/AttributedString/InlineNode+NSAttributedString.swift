@@ -78,7 +78,10 @@ public extension InlineNode {
 
         case .image(let src, _, let width, let height, let isEmoji):
             if isEmoji {
+                let emojiSize = config.baseFont.lineHeight
                 let attachment = NSTextAttachment()
+                attachment.bounds = CGRect(x: 0, y: -3, width: emojiSize, height: emojiSize)
+                attachment.image = UIImage()
                 let attrStr = NSMutableAttributedString(attachment: attachment)
                 let range = NSRange(location: 0, length: attrStr.length)
                 attrStr.addAttribute(.cookedHTMLImageURL, value: src, range: range)

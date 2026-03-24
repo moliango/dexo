@@ -32,6 +32,7 @@ final class SettingsViewController: ObservableViewController {
     // MARK: - Rows
 
     private enum Section: Int, CaseIterable {
+        case general
         case appearance
         case network
     }
@@ -59,11 +60,12 @@ final class SettingsViewController: ObservableViewController {
 extension SettingsViewController: UITableViewDataSource {
     func numberOfSections(in tableView: UITableView) -> Int {
 //        Section.allCases.count
-        1
+        2
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch Section(rawValue: section)! {
+        case .general: return 1
         case .appearance: return 1
         case .network: return networkRows().count
         }
@@ -71,6 +73,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
         switch Section(rawValue: section)! {
+        case .general: return "通用"
         case .appearance: return "外观"
         case .network: return "网络"
         }
@@ -78,6 +81,8 @@ extension SettingsViewController: UITableViewDataSource {
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         switch Section(rawValue: indexPath.section)! {
+        case .general:
+            return makeAutoOpenCell(tableView, indexPath: indexPath)
         case .appearance:
             return makeAppearanceCell(tableView, indexPath: indexPath)
         case .network:
@@ -94,6 +99,17 @@ extension SettingsViewController: UITableViewDataSource {
     }
 
     // MARK: - Cell Factories
+
+    private func makeAutoOpenCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        cell.textLabel?.text = "启动时打开上次论坛"
+        cell.selectionStyle = .none
+        let toggle = UISwitch()
+        toggle.isOn = settings.autoOpenLastForum
+        toggle.addTarget(self, action: #selector(autoOpenToggleChanged(_:)), for: .valueChanged)
+        cell.accessoryView = toggle
+        return cell
+    }
 
     private func makeAppearanceCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
@@ -139,6 +155,8 @@ extension SettingsViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
 
         switch Section(rawValue: indexPath.section)! {
+        case .general:
+            break
         case .appearance:
             showAppearancePicker()
         case .network:
@@ -158,6 +176,10 @@ extension SettingsViewController: UITableViewDelegate {
 // MARK: - Actions
 
 extension SettingsViewController {
+    @objc private func autoOpenToggleChanged(_ sender: UISwitch) {
+        settings.autoOpenLastForum = sender.isOn
+    }
+
     @objc private func dohToggleChanged(_ sender: UISwitch) {
         settings.dohEnabled = sender.isOn
         if !sender.isOn {

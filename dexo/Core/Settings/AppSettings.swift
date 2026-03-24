@@ -48,6 +48,32 @@ final class AppSettings {
         }
     }
 
+    // MARK: - General
+
+    var autoOpenLastForum: Bool {
+        get { defaults.bool(forKey: "autoOpenLastForum") }
+        set { defaults.set(newValue, forKey: "autoOpenLastForum") }
+    }
+
+    var lastOpenedForumId: Int64? {
+        get {
+            guard defaults.object(forKey: "lastOpenedForumId") != nil else { return nil }
+            return Int64(defaults.integer(forKey: "lastOpenedForumId"))
+        }
+        set {
+            if let value = newValue {
+                defaults.set(Int(value), forKey: "lastOpenedForumId")
+            } else {
+                defaults.removeObject(forKey: "lastOpenedForumId")
+            }
+        }
+    }
+
+    var hasShownAutoOpenPrompt: Bool {
+        get { defaults.bool(forKey: "hasShownAutoOpenPrompt") }
+        set { defaults.set(newValue, forKey: "hasShownAutoOpenPrompt") }
+    }
+
     // MARK: - DNS over HTTPS
 
     enum DoHProvider: Int, CaseIterable {

@@ -140,7 +140,7 @@ final class PostNativeCell: UITableViewCell {
 
         NSLayoutConstraint.activate([
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
             avatarImageView.widthAnchor.constraint(equalToConstant: 32),
             avatarImageView.heightAnchor.constraint(equalToConstant: 32),
 
@@ -278,29 +278,18 @@ final class PostNativeCell: UITableViewCell {
             for i in 0 ..< range.length {
                 let loc = range.location + i
                 if let attachment = attrText.attribute(.attachment, at: loc, effectiveRange: nil) as? NSTextAttachment {
-                    // Emoji attachments have zero-size bounds initially; non-emoji have sized bounds
-                    let isEmoji = attachment.bounds.width == 0 && attachment.bounds.height == 0
+                    // Emoji attachments have small bounds (≤ lineHeight); non-emoji have larger bounds
+                    let isEmoji = attachment.bounds.width <= 24 && attachment.bounds.height <= 24
                     entries.append((attachment, loc, url, isEmoji))
                 }
             }
         }
 
-        let emojiSize: CGFloat = 20
-        for entry in entries where entry.isEmoji {
-            entry.attachment.bounds = CGRect(x: 0, y: -3, width: emojiSize, height: emojiSize)
-            entry.attachment.image = UIImage() // 透明占位，防止文件图标
-        }
-
         for entry in entries {
             SDWebImageManager.shared.loadImage(with: entry.url, progress: nil) { [weak textView] image, _, _, _, _, _ in
                 guard let textView, let image else { return }
-                if entry.isEmoji {
-                    entry.attachment.image = image
-                    entry.attachment.bounds = CGRect(x: 0, y: -3, width: emojiSize, height: emojiSize)
-                } else {
-                    entry.attachment.image = image
-                    // Keep the bounds already set by the attributed string builder
-                }
+                entry.attachment.image = image
+                // Keep the bounds already set by the attributed string builder
                 let charRange = NSRange(location: entry.location, length: 1)
                 textView.textStorage.edited(.editedAttributes, range: charRange, changeInLength: 0)
             }
@@ -347,6 +336,10 @@ final class PostNativeCell: UITableViewCell {
         for view in contentStackView.arrangedSubviews {
             if let container = view as? TappableImageContainer {
                 container.cancelImageLoad()
+            } else if let onebox = view as? OneboxCardView {
+                onebox.cancelImageLoad()
+            } else if let video = view as? VideoCardView {
+                video.cancelImageLoad()
             } else if let fallback = view as? FallbackBlockView {
                 fallback.cancelRender()
             }

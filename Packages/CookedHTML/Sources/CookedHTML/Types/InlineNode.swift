@@ -9,3 +9,37 @@ public enum InlineNode: Sendable, Equatable {
     case code(String)
     case lineBreak
 }
+
+public extension [InlineNode] {
+    /// Trim leading and trailing whitespace/newlines from the first and last text nodes.
+    func trimmedWhitespace() -> [InlineNode] {
+        guard !isEmpty else { return self }
+        var result = self
+        // Trim leading whitespace of first text node
+        for i in result.indices {
+            switch result[i] {
+            case .text(let t):
+                let trimmed = t.replacingOccurrences(of: "^[\\s]+", with: "", options: .regularExpression)
+                result[i] = .text(trimmed)
+                if !trimmed.isEmpty { break }
+            default: break
+            }
+            break
+        }
+        // Trim trailing whitespace of last text node
+        for i in result.indices.reversed() {
+            switch result[i] {
+            case .text(let t):
+                let trimmed = t.replacingOccurrences(of: "[\\s]+$", with: "", options: .regularExpression)
+                result[i] = .text(trimmed)
+                if !trimmed.isEmpty { break }
+            default: break
+            }
+            break
+        }
+        return result.filter {
+            if case .text(let t) = $0 { return !t.isEmpty }
+            return true
+        }
+    }
+}

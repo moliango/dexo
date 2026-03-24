@@ -2,6 +2,8 @@ import UIKit
 
 final class ForumListViewController: ObservableViewController {
     private let viewModel = ForumListViewModel()
+    private let settings = AppSettings.shared
+    private var hasAttemptedAutoOpen = false
 
     private lazy var tableView: UITableView = {
         let tv = UITableView(frame: .zero, style: .insetGrouped)
@@ -45,6 +47,18 @@ final class ForumListViewController: ObservableViewController {
         viewModel.loadForums()
     }
 
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard !hasAttemptedAutoOpen else { return }
+        hasAttemptedAutoOpen = true
+        guard settings.autoOpenLastForum,
+              let lastId = settings.lastOpenedForumId,
+              let forum = viewModel.forums.first(where: { $0.id == lastId }) else { return }
+        let containerVC = ForumContainerViewController(forum: forum)
+        containerVC.modalPresentationStyle = .fullScreen
+        present(containerVC, animated: true)
+    }
+
     override func updateUI() {
         var snapshot = NSDiffableDataSourceSnapshot<Int, Int64>()
         snapshot.appendSections([0])
@@ -70,9 +84,27 @@ extension ForumListViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         guard indexPath.row < viewModel.forums.count else { return }
         let forum = viewModel.forums[indexPath.row]
+        settings.lastOpenedForumId = forum.id
         let containerVC = ForumContainerViewController(forum: forum)
         containerVC.modalPresentationStyle = .fullScreen
-        present(containerVC, animated: true)
+        present(containerVC, animated: true) { [weak self] in
+            self?.showAutoOpenPromptIfNeeded()
+        }
+    }
+
+    private func showAutoOpenPromptIfNeeded() {
+        guard !settings.hasShownAutoOpenPrompt else { return }
+        settings.hasShownAutoOpenPrompt = true
+        let alert = UIAlertController(
+            title: "自动打开论坛",
+            message: "是否在启动时自动打开该论坛？",
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "开启", style: .default) { [weak self] _ in
+            self?.settings.autoOpenLastForum = true
+        })
+        alert.addAction(UIAlertAction(title: "不了", style: .cancel))
+        presentedViewController?.present(alert, animated: true)
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
