@@ -252,6 +252,10 @@ final class PostNativeCell: UITableViewCell {
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
         sourceButton.addTarget(self, action: #selector(sourceButtonTapped), for: .touchUpInside)
         bookmarkButton.addTarget(self, action: #selector(bookmarkButtonTapped), for: .touchUpInside)
+
+        avatarImageView.isUserInteractionEnabled = true
+        let avatarTap = UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
+        avatarImageView.addGestureRecognizer(avatarTap)
     }
 
     func configure(
@@ -438,6 +442,11 @@ final class PostNativeCell: UITableViewCell {
     @objc private func replyButtonTapped() {
         guard let post = currentPost else { return }
         delegate?.postCell(didTapReplyToPost: post)
+    }
+
+    @objc private func avatarTapped() {
+        guard let username = currentPost?.username else { return }
+        delegate?.postCell(didTapAvatarForUsername: username)
     }
 
     @objc private func copyLinkTapped() {

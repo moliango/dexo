@@ -2,7 +2,15 @@ import SDWebImage
 import UIKit
 
 final class ProfileHeaderView: UIView {
+    enum StatType: Int {
+        case topics = 0
+        case posts = 1
+        case likes = 2
+        case days = 3
+    }
+
     var onLoginTapped: (() -> Void)?
+    var onStatTapped: ((StatType) -> Void)?
 
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
@@ -221,24 +229,29 @@ final class ProfileHeaderView: UIView {
         statsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard let summary else { return }
 
-        let items: [(String, Int)] = [
-            (String(localized: "me.stats.topics"), summary.topicCount),
-            (String(localized: "me.stats.posts"), summary.postCount),
-            (String(localized: "me.stats.likes"), summary.likesReceived),
-            (String(localized: "me.stats.days"), summary.daysVisited),
+        let items: [(String, Int, StatType)] = [
+            (String(localized: "me.stats.topics"), summary.topicCount, .topics),
+            (String(localized: "me.stats.posts"), summary.postCount, .posts),
+            (String(localized: "me.stats.likes"), summary.likesReceived, .likes),
+            (String(localized: "me.stats.days"), summary.daysVisited, .days),
         ]
 
-        for (label, value) in items {
-            let statView = createStatView(title: label, value: value)
+        for (label, value, statType) in items {
+            let statView = createStatView(title: label, value: value, statType: statType)
             statsStackView.addArrangedSubview(statView)
         }
     }
 
-    private func createStatView(title: String, value: Int) -> UIView {
+    private func createStatView(title: String, value: Int, statType: StatType) -> UIView {
         let container = UIStackView()
         container.axis = .vertical
         container.alignment = .center
         container.spacing = 2
+        container.isUserInteractionEnabled = true
+        container.tag = statType.rawValue
+
+        let tap = UITapGestureRecognizer(target: self, action: #selector(statTapped(_:)))
+        container.addGestureRecognizer(tap)
 
         let valueLabel = UILabel()
         valueLabel.font = .systemFont(ofSize: 18, weight: .bold)
@@ -254,6 +267,12 @@ final class ProfileHeaderView: UIView {
         container.addArrangedSubview(valueLabel)
         container.addArrangedSubview(titleLabel)
         return container
+    }
+
+    @objc private func statTapped(_ gesture: UITapGestureRecognizer) {
+        guard let view = gesture.view,
+              let statType = StatType(rawValue: view.tag) else { return }
+        onStatTapped?(statType)
     }
 
     @objc private func loginTapped() {

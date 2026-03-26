@@ -8,6 +8,7 @@ protocol PostCellDelegate: AnyObject {
     func postCell(didTapToggleDetails detailsIndex: Int, postId: Int)
     func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post)
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool)
+    func postCell(didTapAvatarForUsername username: String)
 }
 
 final class PostWebViewCell: UITableViewCell {
@@ -187,6 +188,10 @@ final class PostWebViewCell: UITableViewCell {
         showRepliesButton.addTarget(self, action: #selector(repliesButtonTapped), for: .touchUpInside)
         copyLinkButton.addTarget(self, action: #selector(copyLinkTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
+
+        avatarImageView.isUserInteractionEnabled = true
+        let avatarTap = UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
+        avatarImageView.addGestureRecognizer(avatarTap)
     }
 
     func configure(
@@ -316,6 +321,11 @@ final class PostWebViewCell: UITableViewCell {
     @objc private func replyButtonTapped() {
         guard let post = currentPost else { return }
         delegate?.postCell(didTapReplyToPost: post)
+    }
+
+    @objc private func avatarTapped() {
+        guard let username = currentPost?.username else { return }
+        delegate?.postCell(didTapAvatarForUsername: username)
     }
 
     @objc private func copyLinkTapped() {

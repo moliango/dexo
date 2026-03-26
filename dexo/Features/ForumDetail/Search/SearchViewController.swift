@@ -42,6 +42,18 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         return button
     }()
 
+    private lazy var sortButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.showsMenuAsPrimaryAction = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.menu = UIMenu(children: [
+            UIDeferredMenuElement.uncached { [weak self] completion in
+                completion(self?.buildSortMenuElements() ?? [])
+            },
+        ])
+        return button
+    }()
+
     private let filterSeparator: UIView = {
         let v = UIView()
         v.backgroundColor = .separator
@@ -142,6 +154,7 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         view.addSubview(filterBar)
         filterBar.addSubview(categoryButton)
         filterBar.addSubview(tagButton)
+        filterBar.addSubview(sortButton)
         filterBar.addSubview(filterSeparator)
 
         NSLayoutConstraint.activate([
@@ -155,7 +168,10 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
 
             tagButton.leadingAnchor.constraint(equalTo: categoryButton.trailingAnchor, constant: 8),
             tagButton.centerYAnchor.constraint(equalTo: filterBar.centerYAnchor),
-            tagButton.trailingAnchor.constraint(lessThanOrEqualTo: filterBar.trailingAnchor, constant: -16),
+
+            sortButton.leadingAnchor.constraint(equalTo: tagButton.trailingAnchor, constant: 8),
+            sortButton.centerYAnchor.constraint(equalTo: filterBar.centerYAnchor),
+            sortButton.trailingAnchor.constraint(lessThanOrEqualTo: filterBar.trailingAnchor, constant: -16),
 
             filterSeparator.leadingAnchor.constraint(equalTo: filterBar.leadingAnchor),
             filterSeparator.trailingAnchor.constraint(equalTo: filterBar.trailingAnchor),
@@ -196,6 +212,15 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
                 isActive: false
             )
         }
+
+        // Sort button
+        let isSortActive = viewModel.selectedSortOrder != .relevance
+        applyButtonConfig(
+            sortButton,
+            title: viewModel.selectedSortOrder.displayName,
+            systemImage: isSortActive ? "arrow.up.arrow.down.circle.fill" : "arrow.up.arrow.down.circle",
+            isActive: isSortActive
+        )
     }
 
     private func applyButtonConfig(
@@ -321,6 +346,25 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         viewModel.selectedTag = tag
         updateFilterButtons()
         triggerSearch()
+    }
+
+    private func selectSortOrder(_ order: SearchSortOrder) {
+        viewModel.selectedSortOrder = order
+        updateFilterButtons()
+        triggerSearch()
+    }
+
+    // MARK: - Sort Menu
+
+    private func buildSortMenuElements() -> [UIMenuElement] {
+        SearchSortOrder.allCases.map { order in
+            UIAction(
+                title: order.displayName,
+                state: viewModel.selectedSortOrder == order ? .on : .off
+            ) { [weak self] _ in
+                self?.selectSortOrder(order)
+            }
+        }
     }
 
     // MARK: - Search

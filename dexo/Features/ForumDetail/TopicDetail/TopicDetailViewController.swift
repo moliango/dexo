@@ -390,6 +390,11 @@ extension TopicDetailViewController: PostCellDelegate {
         }
     }
 
+    func postCell(didTapAvatarForUsername username: String) {
+        let vc = UserProfileViewController(api: api, username: username)
+        navigationController?.pushViewController(vc, animated: true)
+    }
+
     func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) {
         guard let authGate = findForumContainer() else { return }
         authGate.requireAuth { [weak self] in

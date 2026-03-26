@@ -8,9 +8,8 @@ final class MeViewController: ObservableViewController {
     private let profileHeader = ProfileHeaderView()
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .grouped)
+        let tv = UITableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.register(BookmarkCell.self, forCellReuseIdentifier: BookmarkCell.reuseIdentifier)
         tv.delegate = self
         tv.dataSource = self
         return tv
@@ -62,6 +61,10 @@ final class MeViewController: ObservableViewController {
 
         profileHeader.onLoginTapped = { [weak self] in
             self?.loginTapped()
+        }
+
+        profileHeader.onStatTapped = { [weak self] statType in
+            self?.handleStatTapped(statType)
         }
 
         loadData()
@@ -153,12 +156,27 @@ final class MeViewController: ObservableViewController {
             self.authGate?.performLogout()
             self.viewModel.currentUser = nil
             self.viewModel.userProfile = nil
-            self.viewModel.bookmarks = []
             self.viewModel.summary = nil
             self.viewModel.requiresLogin = true
         })
         alert.addAction(UIAlertAction(title: String(localized: "cancel"), style: .cancel))
         present(alert, animated: true)
+    }
+
+    // MARK: - Stat Taps
+
+    private func handleStatTapped(_ statType: ProfileHeaderView.StatType) {
+        guard let username = viewModel.currentUser?.username else { return }
+        switch statType {
+        case .topics:
+            let vc = UserPostsViewController(api: api, username: username, filter: .topics)
+            navigationController?.pushViewController(vc, animated: true)
+        case .posts:
+            let vc = UserPostsViewController(api: api, username: username, filter: .posts)
+            navigationController?.pushViewController(vc, animated: true)
+        case .likes, .days:
+            break
+        }
     }
 }
 
@@ -173,8 +191,7 @@ extension MeViewController: UITableViewDataSource {
         switch section {
         case 0:
             let isLoggedIn = authGate?.isAuthenticated() ?? false
-            if !isLoggedIn { return 0 }
-            return max(viewModel.bookmarks.count, 1) // At least 1 for empty state
+            return isLoggedIn ? 1 : 0
         case 1:
             return 1
         default:
@@ -182,32 +199,15 @@ extension MeViewController: UITableViewDataSource {
         }
     }
 
-    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        switch section {
-        case 0:
-            let isLoggedIn = authGate?.isAuthenticated() ?? false
-            return isLoggedIn ? String(localized: "me.bookmarks") : nil
-        default:
-            return nil
-        }
-    }
-
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
         switch indexPath.section {
         case 0:
-            if viewModel.bookmarks.isEmpty {
-                let cell = UITableViewCell()
-                cell.textLabel?.text = String(localized: "me.bookmarks.empty")
-                cell.textLabel?.textColor = .secondaryLabel
-                cell.textLabel?.textAlignment = .center
-                cell.selectionStyle = .none
-                return cell
-            }
-            guard let cell = tableView.dequeueReusableCell(withIdentifier: BookmarkCell.reuseIdentifier, for: indexPath) as? BookmarkCell else {
-                return UITableViewCell()
-            }
-            let bookmark = viewModel.bookmarks[indexPath.row]
-            cell.configure(with: bookmark, baseURL: api.baseURL)
+            let cell = UITableViewCell()
+            var content = cell.defaultContentConfiguration()
+            content.image = UIImage(systemName: "bookmark.fill")
+            content.text = String(localized: "me.bookmarks")
+            content.imageProperties.tintColor = .tintColor
+            cell.contentConfiguration = content
             cell.accessoryType = .disclosureIndicator
             return cell
 
@@ -219,7 +219,7 @@ extension MeViewController: UITableViewDataSource {
                 cell.textLabel?.textColor = .systemRed
             } else {
                 cell.textLabel?.text = String(localized: "me.login")
-                cell.textLabel?.textColor = .systemBlue
+                cell.textLabel?.textColor = .tintColor
             }
             cell.textLabel?.textAlignment = .center
             return cell
@@ -238,12 +238,9 @@ extension MeViewController: UITableViewDelegate {
 
         switch indexPath.section {
         case 0:
-            guard !viewModel.bookmarks.isEmpty else { return }
-            let bookmark = viewModel.bookmarks[indexPath.row]
-            if let topicId = bookmark.topicId {
-                let detailVC = TopicDetailViewController(api: api, topicId: topicId)
-                navigationController?.pushViewController(detailVC, animated: true)
-            }
+            guard let username = viewModel.currentUser?.username else { return }
+            let vc = BookmarksViewController(api: api, username: username)
+            navigationController?.pushViewController(vc, animated: true)
         case 1:
             let isLoggedIn = authGate?.isAuthenticated() ?? false
             if isLoggedIn {

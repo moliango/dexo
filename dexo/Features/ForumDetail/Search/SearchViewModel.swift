@@ -1,5 +1,23 @@
 import Foundation
 
+enum SearchSortOrder: String, CaseIterable {
+    case relevance
+    case latest
+    case likes
+    case views
+    case latestTopic = "latest_topic"
+
+    var displayName: String {
+        switch self {
+        case .relevance: String(localized: "search.sort.relevance")
+        case .latest: String(localized: "search.sort.latest")
+        case .likes: String(localized: "search.sort.most_likes")
+        case .views: String(localized: "search.sort.most_views")
+        case .latestTopic: String(localized: "search.sort.latest_topic")
+        }
+    }
+}
+
 @Observable
 final class SearchViewModel {
     var searchResults: [DiscourseSearchResult.SearchPost] = []
@@ -11,6 +29,7 @@ final class SearchViewModel {
     var categories: [DiscourseCategory] = []
     var selectedCategoryId: Int?
     var selectedTag: String?
+    var selectedSortOrder: SearchSortOrder = .latest
 
     private let api: DiscourseAPI
     private var currentPage = 0
@@ -97,6 +116,9 @@ final class SearchViewModel {
         }
         if let tag = selectedTag {
             parts.append("tag:\(tag)")
+        }
+        if selectedSortOrder != .relevance {
+            parts.append("order:\(selectedSortOrder.rawValue)")
         }
         return parts.joined(separator: " ")
     }

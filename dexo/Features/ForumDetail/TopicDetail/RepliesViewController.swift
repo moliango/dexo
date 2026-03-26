@@ -184,6 +184,12 @@ extension RepliesViewController: PostCellDelegate {
         }
     }
 
+    func postCell(didTapAvatarForUsername username: String) {
+        let vc = UserProfileViewController(api: api, username: username)
+        let nav = UINavigationController(rootViewController: vc)
+        present(nav, animated: true)
+    }
+
     private func findAuthGating() -> AuthGating? {
         var vc: UIViewController? = self
         while let parent = vc?.parent {
