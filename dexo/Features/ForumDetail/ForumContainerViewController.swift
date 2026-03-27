@@ -75,17 +75,17 @@ final class ForumContainerViewController: UIViewController, AuthGating {
             }
             var rightItems = [
                 UIBarButtonItem(
-                    image: UIImage(systemName: "xmark"),
+                    image: UIImage(systemName: "smallcircle.filled.circle"),
                     style: .plain,
                     target: self,
                     action: #selector(dismissButtonTapped)
                 ),
-                UIBarButtonItem(
-                    image: UIImage(systemName: "ellipsis"),
-                    style: .plain,
-                    target: self,
-                    action: #selector(menuButtonTapped)
-                ),
+//                UIBarButtonItem(
+//                    image: UIImage(systemName: "ellipsis"),
+//                    style: .plain,
+//                    target: self,
+//                    action: #selector(menuButtonTapped)
+//                ),
             ]
 
             // On iOS 17, add search button to Home tab (iOS 18+ uses UISearchTab)

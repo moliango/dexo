@@ -8,6 +8,7 @@ final class HomeViewController: ObservableViewController {
     private let segmentedControl: UISegmentedControl = {
         let sc = UISegmentedControl(items: [String(localized: "home.latest"), String(localized: "home.top")])
         sc.selectedSegmentIndex = 0
+        sc.backgroundColor = UIColor.clear
         sc.translatesAutoresizingMaskIntoConstraints = false
         return sc
     }()
@@ -145,8 +146,8 @@ final class HomeViewController: ObservableViewController {
 
         NSLayoutConstraint.activate([
             segmentedControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            segmentedControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            segmentedControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            segmentedControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            segmentedControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
 
             tableView.topAnchor.constraint(equalTo: view.topAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -164,6 +165,38 @@ final class HomeViewController: ObservableViewController {
             loginButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             loginButton.topAnchor.constraint(equalTo: errorLabel.bottomAnchor, constant: 16),
         ])
+
+        if #available(iOS 26, *) {
+            let blurView = UIVisualEffectView(effect: UIGlassEffect())
+            blurView.translatesAutoresizingMaskIntoConstraints = false
+            blurView.layer.cornerRadius = segmentedControl.bounds.height / 2
+
+            blurView.clipsToBounds = true
+
+            segmentedControl.superview?.insertSubview(blurView, belowSubview: segmentedControl)
+
+            NSLayoutConstraint.activate([
+                blurView.topAnchor.constraint(equalTo: segmentedControl.topAnchor, constant: -2),
+                blurView.bottomAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 2),
+                blurView.leadingAnchor.constraint(equalTo: segmentedControl.leadingAnchor, constant: -2),
+                blurView.trailingAnchor.constraint(equalTo: segmentedControl.trailingAnchor, constant: 2),
+            ])
+        } else {
+            let blurView = UIVisualEffectView(effect: UIBlurEffect(style: .systemThinMaterial))
+            blurView.translatesAutoresizingMaskIntoConstraints = false
+            blurView.layer.cornerRadius = segmentedControl.bounds.height / 4
+
+            blurView.clipsToBounds = true
+
+            segmentedControl.superview?.insertSubview(blurView, belowSubview: segmentedControl)
+
+            NSLayoutConstraint.activate([
+                blurView.topAnchor.constraint(equalTo: segmentedControl.topAnchor, constant: -2),
+                blurView.bottomAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 2),
+                blurView.leadingAnchor.constraint(equalTo: segmentedControl.leadingAnchor, constant: -2),
+                blurView.trailingAnchor.constraint(equalTo: segmentedControl.trailingAnchor, constant: 2),
+            ])
+        }
 
         segmentedControl.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
         loginButton.addTarget(self, action: #selector(loginTapped), for: .touchUpInside)
