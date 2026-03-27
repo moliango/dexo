@@ -88,6 +88,9 @@ final class TopicDetailBottomBar: UIView {
     private func makeCircularButton(icon: String) -> UIButton {
         let size = Self.buttonSize
         var config = UIButton.Configuration.plain()
+        if #available(iOS 26.0, *) {
+            config = UIButton.Configuration.glass()
+        }
         config.image = UIImage(systemName: icon)
         config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 16, weight: .medium)
         config.baseForegroundColor = .label
@@ -98,13 +101,13 @@ final class TopicDetailBottomBar: UIView {
         button.layer.cornerRadius = size / 2
         button.clipsToBounds = false
 
-        // Shadow (only visible when no glass; glass handles its own appearance)
-        button.layer.shadowColor = UIColor.black.cgColor
-        button.layer.shadowOpacity = 0.12
-        button.layer.shadowOffset = CGSize(width: 0, height: 2)
-        button.layer.shadowRadius = 4
-
-        addGlassBackground(to: button, size: size)
+        if #unavailable(iOS 26.0) {
+            button.layer.shadowColor = UIColor.black.cgColor
+            button.layer.shadowOpacity = 0.12
+            button.layer.shadowOffset = CGSize(width: 0, height: 2)
+            button.layer.shadowRadius = 4
+            addGlassBackground(to: button, size: size)
+        }
 
         return button
     }
@@ -117,6 +120,7 @@ final class TopicDetailBottomBar: UIView {
             glassView.clipsToBounds = true
             glassView.isUserInteractionEnabled = false
             button.insertSubview(glassView, at: 0)
+
             NSLayoutConstraint.activate([
                 glassView.topAnchor.constraint(equalTo: button.topAnchor),
                 glassView.leadingAnchor.constraint(equalTo: button.leadingAnchor),
