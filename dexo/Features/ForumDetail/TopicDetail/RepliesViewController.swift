@@ -42,7 +42,6 @@ final class RepliesViewController: UIViewController {
             baseURL: self.baseURL,
             hasUnsupportedBlocks: hasUnsupported,
             cookedHTML: post.cooked,
-            emojiURLMap: self.api.emojiURLMap
         )
         return cell
     }

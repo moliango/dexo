@@ -22,7 +22,8 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(swift test:*)",
       "Bash(grep:*)",
-      "Bash(make generate:*)"
+      "Bash(make generate:*)",
+      "Bash(find:*)"
     ]
   }
 }

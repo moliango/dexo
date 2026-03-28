@@ -1,5 +1,5 @@
 What to Test
 
-- Adapt layout for transparent navigation bar
-- Add category selector on home screen
-- Add scroll-to-top, OP-only filter, and jump-to-floor features
+1. User with both show name and username
+2. User with empty/null name → falls back to username
+3. Topic title with shortcode → displays emoji

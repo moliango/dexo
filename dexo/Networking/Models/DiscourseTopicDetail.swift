@@ -3,6 +3,7 @@ import Foundation
 struct DiscourseTopicDetail: Decodable {
     let id: Int
     let title: String
+    let fancyTitle: String?
     let postsCount: Int
     let replyCount: Int
     let categoryId: Int?
@@ -11,6 +12,7 @@ struct DiscourseTopicDetail: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case id, title
+        case fancyTitle = "fancy_title"
         case postsCount = "posts_count"
         case replyCount = "reply_count"
         case categoryId = "category_id"
@@ -41,6 +43,7 @@ struct DiscourseTopicDetail: Decodable {
 
     struct Post: Decodable, Identifiable {
         let id: Int
+        let name: String?
         let username: String
         let avatarTemplate: String?
         let createdAt: String
@@ -59,7 +62,7 @@ struct DiscourseTopicDetail: Decodable {
         let reactionUsersCount: Int
 
         enum CodingKeys: String, CodingKey {
-            case id, username, cooked
+            case id, name, username, cooked
             case avatarTemplate = "avatar_template"
             case createdAt = "created_at"
             case postNumber = "post_number"
@@ -80,6 +83,8 @@ struct DiscourseTopicDetail: Decodable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(Int.self, forKey: .id)
             username = try container.decode(String.self, forKey: .username)
+            name = (try? container.decodeIfPresent(String.self, forKey: .name))
+                .flatMap { $0.isEmpty ? nil : $0 } ?? username
             avatarTemplate = try container.decodeIfPresent(String.self, forKey: .avatarTemplate)
             createdAt = try container.decode(String.self, forKey: .createdAt)
             cooked = try container.decode(String.self, forKey: .cooked)

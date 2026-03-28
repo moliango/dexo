@@ -37,9 +37,17 @@ final class PostNativeCell: UITableViewCell {
         return iv
     }()
 
-    private let usernameLabel: UILabel = {
+    private let nameLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 14, weight: .semibold)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private let usernameLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 12)
+        label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
@@ -168,6 +176,7 @@ final class PostNativeCell: UITableViewCell {
     private func setupViews() {
         contentView.addSubview(avatarImageView)
         contentView.addSubview(flairImageView)
+        contentView.addSubview(nameLabel)
         contentView.addSubview(usernameLabel)
         contentView.addSubview(userTitleLabel)
         contentView.addSubview(timeLabel)
@@ -193,11 +202,14 @@ final class PostNativeCell: UITableViewCell {
             flairImageView.widthAnchor.constraint(equalToConstant: 14),
             flairImageView.heightAnchor.constraint(equalToConstant: 14),
 
-            usernameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            nameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
+
+            usernameLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
             usernameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
 
-            userTitleLabel.lastBaselineAnchor.constraint(equalTo: usernameLabel.lastBaselineAnchor),
-            userTitleLabel.leadingAnchor.constraint(equalTo: usernameLabel.trailingAnchor, constant: 4),
+            userTitleLabel.lastBaselineAnchor.constraint(equalTo: nameLabel.lastBaselineAnchor),
+            userTitleLabel.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 4),
             userTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: replyToLabel.leadingAnchor, constant: -8),
 
             replyToLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
@@ -268,7 +280,6 @@ final class PostNativeCell: UITableViewCell {
         baseURL: String,
         hasUnsupportedBlocks: Bool,
         cookedHTML: String,
-        emojiURLMap: [String: String]
     ) {
         postId = post.id
         self.postLink = postLink
@@ -277,6 +288,7 @@ final class PostNativeCell: UITableViewCell {
         self.cookedHTML = cookedHTML
         sourceButton.isHidden = !hasUnsupportedBlocks
 
+        nameLabel.text = post.name
         usernameLabel.text = post.username
         timeLabel.text = Self.formatDate(post.createdAt)
         floorLabel.text = "#\(floorNumber)"
@@ -320,7 +332,7 @@ final class PostNativeCell: UITableViewCell {
         }
 
         // Reactions
-        configureReactions(post.reactions, count: post.reactionUsersCount, emojiURLMap: emojiURLMap, baseURL: baseURL)
+        configureReactions(post.reactions, count: post.reactionUsersCount, baseURL: baseURL)
 
         // Bookmark
         let bookmarkSymbol = post.bookmarked ? "bookmark.fill" : "bookmark"
@@ -345,7 +357,7 @@ final class PostNativeCell: UITableViewCell {
         }
     }
 
-    private func configureReactions(_ reactions: [DiscourseTopicDetail.Reaction], count: Int, emojiURLMap: [String: String], baseURL: String) {
+    private func configureReactions(_ reactions: [DiscourseTopicDetail.Reaction], count: Int, baseURL: String) {
         reactionStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
         guard !reactions.isEmpty else {
             reactionStackView.isHidden = true
@@ -360,11 +372,8 @@ final class PostNativeCell: UITableViewCell {
                 iv.widthAnchor.constraint(equalToConstant: 16),
                 iv.heightAnchor.constraint(equalToConstant: 16),
             ])
-            if let urlString = emojiURLMap[reaction.id] {
-                let fullURL = urlString.hasPrefix("http") ? urlString : baseURL + urlString
-                if let url = URL(string: fullURL) {
-                    iv.sd_setImage(with: url)
-                }
+            if let url = URL(string: EmojiStore.lookup(for: reaction.id) ?? "") {
+                iv.sd_setImage(with: url)
             }
             reactionStackView.addArrangedSubview(iv)
         }

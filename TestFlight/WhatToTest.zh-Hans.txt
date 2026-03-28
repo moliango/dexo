@@ -1,5 +1,5 @@
 What to Test
 
-• 适配透明导航栏
-• 首页添加板块选择
-• 增加回到顶层,只看楼主,跳转楼层功能
+1. 用户同时显示 name 和 username
+2. 用户 name 为空或 null → 回退显示 username
+3. 话题标题含 shortcode → 正确显示 emoji

@@ -58,7 +58,7 @@ final class HomeViewController: ObservableViewController {
             with: topic,
             avatarURL: avatarURL,
             categoryName: category?.name,
-            categoryColor: categoryColor
+            categoryColor: categoryColor,
         )
         return cell
     }
@@ -204,6 +204,9 @@ final class HomeViewController: ObservableViewController {
 
         Task {
             await viewModel.loadTopics()
+        }
+        Task {
+            await api.loadOrFetchEmojiMap()
         }
     }
 

@@ -5,9 +5,15 @@ struct DiscourseCustomEmoji: Decodable {
     let url: String
 }
 
-struct DiscourseEmojiEntry: Decodable {
+struct DiscourseEmojiEntry: Codable {
     let name: String
     let url: String
+    let searchAliases: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case name, url
+        case searchAliases = "search_aliases"
+    }
 }
 
 struct DiscourseCreatePostResponse: Decodable {

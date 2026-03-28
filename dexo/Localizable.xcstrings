@@ -276,6 +276,22 @@
     "forum.overlay.close" : {
 
     },
+    "home.filter.all_categories" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Categories"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部分类"
+          }
+        }
+      }
+    },
     "home.latest" : {
       "localizations" : {
         "en" : {
@@ -304,38 +320,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录后浏览此论坛"
-          }
-        }
-      }
-    },
-    "topic_detail.default_title" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Detail"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "详情"
-          }
-        }
-      }
-    },
-    "home.filter.all_categories" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "All Categories"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部分类"
           }
         }
       }
@@ -901,86 +885,6 @@
         }
       }
     },
-    "search.tag_picker.clear" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Clear Tag Filter"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "清除标签筛选"
-          }
-        }
-      }
-    },
-    "search.tag_picker.empty" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No tags found"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未找到标签"
-          }
-        }
-      }
-    },
-    "search.tag_picker.placeholder" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search tags…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "搜索标签…"
-          }
-        }
-      }
-    },
-    "search.tag_picker.title" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Tags"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "标签"
-          }
-        }
-      }
-    },
-    "search.title" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Search"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "搜索"
-          }
-        }
-      }
-    },
     "search.sort.latest" : {
       "localizations" : {
         "en" : {
@@ -1057,6 +961,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "相关性"
+          }
+        }
+      }
+    },
+    "search.tag_picker.clear" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear Tag Filter"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清除标签筛选"
+          }
+        }
+      }
+    },
+    "search.tag_picker.empty" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No tags found"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到标签"
+          }
+        }
+      }
+    },
+    "search.tag_picker.placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search tags…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索标签…"
+          }
+        }
+      }
+    },
+    "search.tag_picker.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tags"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "标签"
+          }
+        }
+      }
+    },
+    "search.title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Search"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索"
           }
         }
       }
@@ -1302,6 +1286,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跳转楼层"
+          }
+        }
+      }
+    },
+    "topic_detail.default_title" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Detail"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "详情"
           }
         }
       }

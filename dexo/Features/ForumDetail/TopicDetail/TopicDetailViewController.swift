@@ -55,7 +55,6 @@ final class TopicDetailViewController: ObservableViewController {
             baseURL: self.baseURL,
             hasUnsupportedBlocks: hasUnsupported,
             cookedHTML: post.cooked,
-            emojiURLMap: self.api.emojiURLMap
         )
         return cell
     }
@@ -71,6 +70,13 @@ final class TopicDetailViewController: ObservableViewController {
         let label = UILabel()
         label.font = .systemFont(ofSize: 20, weight: .bold)
         label.numberOfLines = 0
+        return label
+    }()
+
+    private let navTitleLabel: UILabel = {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        label.numberOfLines = 1
         return label
     }()
 
@@ -152,6 +158,8 @@ final class TopicDetailViewController: ObservableViewController {
         }
         Task {
             await api.loadOrFetchEmojiMap()
+            hasTitleHeader = false
+            updateUI()
         }
     }
 
@@ -167,8 +175,9 @@ final class TopicDetailViewController: ObservableViewController {
 
     override func updateUI() {
         // Title header (set once)
-        if let topicTitle = viewModel.topic?.title, !hasTitleHeader {
-            titleLabel.text = topicTitle
+        if let topic = viewModel.topic, !hasTitleHeader {
+            let displayTitle = topic.fancyTitle ?? topic.title
+            configureTitleLabel(displayTitle)
             updateTitleHeader()
             hasTitleHeader = true
         }
@@ -242,6 +251,83 @@ final class TopicDetailViewController: ObservableViewController {
         let size = container.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
         container.frame.size = size
         tableView.tableHeaderView = container
+    }
+
+    // MARK: - Emoji Title
+
+    private static let emojiPattern = try! NSRegularExpression(pattern: ":[\\w\\-+]+:")
+
+    private func configureTitleLabel(_ title: String) {
+        guard !EmojiStore.lookupMap.isEmpty else {
+            titleLabel.text = title
+            navTitleLabel.text = title
+            return
+        }
+        let matches = Self.emojiPattern.matches(in: title, range: NSRange(title.startIndex..., in: title))
+        let hasEmoji = matches.contains(where: {
+            let nsTitle = title as NSString
+            let full = nsTitle.substring(with: $0.range)
+            let code = String(full.dropFirst().dropLast())
+            return EmojiStore.url(for: code) != nil
+        })
+        guard hasEmoji else {
+            titleLabel.text = title
+            navTitleLabel.text = title
+            return
+        }
+
+        let headerResult = buildEmojiAttributedString(title, font: titleLabel.font ?? .systemFont(ofSize: 20, weight: .bold))
+        let navResult = buildEmojiAttributedString(title, font: navTitleLabel.font ?? .systemFont(ofSize: 17, weight: .semibold))
+
+        titleLabel.attributedText = headerResult
+        navTitleLabel.attributedText = navResult
+        navTitleLabel.sizeToFit()
+        loadTitleEmojiImages(in: headerResult, label: titleLabel)
+        loadTitleEmojiImages(in: navResult, label: navTitleLabel)
+    }
+
+    private func buildEmojiAttributedString(_ title: String, font: UIFont) -> NSMutableAttributedString {
+        let matches = Self.emojiPattern.matches(in: title, range: NSRange(title.startIndex..., in: title))
+        let result = NSMutableAttributedString()
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        var lastEnd = title.startIndex
+
+        for match in matches {
+            guard let fullRange = Range(match.range, in: title) else { continue }
+            let code = String(title[fullRange].dropFirst().dropLast())
+
+            if lastEnd < fullRange.lowerBound {
+                result.append(NSAttributedString(string: String(title[lastEnd..<fullRange.lowerBound]), attributes: attrs))
+            }
+
+            if let urlString = EmojiStore.url(for: code), let url = URL(string: urlString) {
+                let attachment = EmojiTextAttachment()
+                attachment.emojiURL = url
+                attachment.bounds = CGRect(x: 0, y: font.descender, width: font.lineHeight, height: font.lineHeight)
+                result.append(NSAttributedString(attachment: attachment))
+            } else {
+                result.append(NSAttributedString(string: String(title[fullRange]), attributes: attrs))
+            }
+
+            lastEnd = fullRange.upperBound
+        }
+
+        if lastEnd < title.endIndex {
+            result.append(NSAttributedString(string: String(title[lastEnd...]), attributes: attrs))
+        }
+        return result
+    }
+
+    private func loadTitleEmojiImages(in attributedString: NSMutableAttributedString, label: UILabel) {
+        attributedString.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributedString.length)) { value, _, _ in
+            guard let attachment = value as? EmojiTextAttachment, let url = attachment.emojiURL else { return }
+            SDWebImageManager.shared.loadImage(with: url, progress: nil) { [weak self] image, _, _, _, _, _ in
+                guard let image, let self else { return }
+                attachment.image = image
+                label.setNeedsDisplay()
+                self.view.setNeedsLayout()
+            }
+        }
     }
 
     // MARK: - Container Access
@@ -427,11 +513,7 @@ extension TopicDetailViewController: UITableViewDelegate {
         guard let header = tableView.tableHeaderView else { return }
         let headerBottom = header.frame.maxY
         let offsetY = scrollView.contentOffset.y + scrollView.safeAreaInsets.top
-        if offsetY >= headerBottom {
-            title = viewModel.topic?.title
-        } else {
-            title = String(localized: "topic_detail.default_title")
-        }
+        navigationItem.titleView = offsetY >= headerBottom ? navTitleLabel : nil
     }
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {

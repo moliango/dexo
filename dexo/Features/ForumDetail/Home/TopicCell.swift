@@ -97,9 +97,9 @@ final class TopicCell: UITableViewCell {
         with topic: DiscourseTopicList.Topic,
         avatarURL: URL?,
         categoryName: String?,
-        categoryColor: UIColor?
+        categoryColor: UIColor?,
     ) {
-        titleLabel.text = topic.fancyTitle
+        configureTitleWithEmoji(topic.fancyTitle)
 
         // Reply count with gray→orange color
         let replies = max(topic.postsCount - 1, 0)
@@ -139,11 +139,87 @@ final class TopicCell: UITableViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         titleLabel.text = nil
+        titleLabel.attributedText = nil
         replyCountLabel.text = nil
         categoryLabel.attributedText = nil
         timeLabel.text = nil
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
+    }
+
+    // MARK: - Emoji title
+
+    private static let emojiPattern = try! NSRegularExpression(pattern: ":([\\w\\-+]+):")
+
+    private func configureTitleWithEmoji(_ title: String) {
+        guard !EmojiStore.lookupMap.isEmpty else {
+            titleLabel.attributedText = nil
+            titleLabel.text = title
+            return
+        }
+        let matches = Self.emojiPattern.matches(in: title, range: NSRange(title.startIndex..., in: title))
+        guard !matches.isEmpty, matches.contains(where: {
+            let code = (title as NSString).substring(with: $0.range(at: 1))
+            return EmojiStore.url(for: code) != nil
+        }) else {
+            titleLabel.attributedText = nil
+            titleLabel.text = title
+            return
+        }
+
+        let result = NSMutableAttributedString()
+        let titleFont = titleLabel.font ?? .systemFont(ofSize: 16, weight: .medium)
+        let attrs: [NSAttributedString.Key: Any] = [.font: titleFont]
+        var lastEnd = title.startIndex
+
+        for match in matches {
+            guard let fullRange = Range(match.range, in: title),
+                  let codeRange = Range(match.range(at: 1), in: title)
+            else { continue }
+
+            let code = String(title[codeRange])
+
+            // Append text before this match
+            if lastEnd < fullRange.lowerBound {
+                result.append(NSAttributedString(string: String(title[lastEnd..<fullRange.lowerBound]), attributes: attrs))
+            }
+
+            if let urlString = EmojiStore.url(for: code), let url = URL(string: urlString) {
+                // Emoji image attachment
+                let attachment = EmojiTextAttachment()
+                attachment.emojiURL = url
+                attachment.bounds = CGRect(x: 0, y: titleFont.descender, width: titleFont.lineHeight, height: titleFont.lineHeight)
+                result.append(NSAttributedString(attachment: attachment))
+            } else {
+                // No URL found — keep original text
+                result.append(NSAttributedString(string: String(title[fullRange]), attributes: attrs))
+            }
+
+            lastEnd = fullRange.upperBound
+        }
+
+        // Append remaining text
+        if lastEnd < title.endIndex {
+            result.append(NSAttributedString(string: String(title[lastEnd...]), attributes: attrs))
+        }
+
+        titleLabel.attributedText = result
+
+        // Load emoji images
+        loadEmojiImages(in: result)
+    }
+
+    private func loadEmojiImages(in attributedString: NSMutableAttributedString) {
+        attributedString.enumerateAttribute(.attachment, in: NSRange(location: 0, length: attributedString.length)) { value, _, _ in
+            guard let attachment = value as? EmojiTextAttachment, let url = attachment.emojiURL else { return }
+            SDWebImageManager.shared.loadImage(with: url, progress: nil) { [weak self] image, _, _, _, _, _ in
+                guard let image, let self else { return }
+                attachment.image = image
+                self.titleLabel.setNeedsDisplay()
+                // Force layout update so the label redraws with the loaded image
+                self.setNeedsLayout()
+            }
+        }
     }
 
     // MARK: - Helpers
