@@ -1,5 +1,3 @@
 What to Test
 
-1. User with both show name and username
-2. User with empty/null name → falls back to username
-3. Topic title with shortcode → displays emoji
+1. Test WebLogin
