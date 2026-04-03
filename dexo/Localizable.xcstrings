@@ -1435,6 +1435,9 @@
         }
       }
     },
+    "topic_detail.loading_earlier" : {
+
+    },
     "user.posts_title" : {
       "localizations" : {
         "en" : {

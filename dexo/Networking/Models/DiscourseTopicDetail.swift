@@ -8,11 +8,12 @@ struct DiscourseTopicDetail: Decodable {
     let replyCount: Int
     let categoryId: Int?
     let createdAt: String
+    let tags: [Tag]
     var postStream: PostStream
     let validReactions: [String]
 
     enum CodingKeys: String, CodingKey {
-        case id, title
+        case id, title, tags
         case fancyTitle = "fancy_title"
         case postsCount = "posts_count"
         case replyCount = "reply_count"
@@ -31,6 +32,7 @@ struct DiscourseTopicDetail: Decodable {
         replyCount = try container.decode(Int.self, forKey: .replyCount)
         categoryId = try? container.decodeIfPresent(Int.self, forKey: .categoryId)
         createdAt = try container.decode(String.self, forKey: .createdAt)
+        tags = (try? container.decodeIfPresent([Tag].self, forKey: .tags)) ?? []
         postStream = try container.decode(PostStream.self, forKey: .postStream)
         validReactions = (try? container.decodeIfPresent([String].self, forKey: .validReactions)) ?? []
     }
@@ -38,6 +40,12 @@ struct DiscourseTopicDetail: Decodable {
     struct PostStream: Decodable {
         var posts: [Post]
         let stream: [Int]?
+    }
+
+    struct Tag: Decodable {
+        let id: Int
+        let name: String
+        let slug: String
     }
 
     struct ReplyToUser: Decodable {

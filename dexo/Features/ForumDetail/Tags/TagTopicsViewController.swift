@@ -124,7 +124,7 @@ final class TagTopicsViewController: ObservableViewController {
         self.tagName = tagName
         self.viewModel = TagTopicsViewModel(api: api, tagName: tagName)
         super.init(nibName: nil, bundle: nil)
-        title = "#\(tagName)"
+        title = tagName
     }
 
     required init?(coder: NSCoder) {

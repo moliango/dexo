@@ -12,6 +12,8 @@ final class TopicDetailViewController: ObservableViewController {
     private var isLoadingEarlierLocally = false
     private var pendingScrollToFloor: Int?
     private var lastScrollOffset: CGFloat = 0
+    /// Suppress load-earlier after a jump until user scrolls down first
+    private var suppressLoadEarlier = false
     /// Anchor info for restoring scroll position after loading earlier posts
     private var earlierLoadAnchor: (postId: Int, cellTopOffset: CGFloat)?
 
@@ -79,6 +81,12 @@ final class TopicDetailViewController: ObservableViewController {
         return label
     }()
 
+    private let tagsContainer: UIView = {
+        let v = UIView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        return v
+    }()
+
     private let navTitleLabel: UILabel = {
         let label = UILabel()
         label.font = .systemFont(ofSize: 17, weight: .semibold)
@@ -104,10 +112,31 @@ final class TopicDetailViewController: ObservableViewController {
         return spinner
     }()
 
-    private let headerSpinner: UIActivityIndicatorView = {
+    private lazy var topLoadingBar: UIView = {
+        let bar = UIView()
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.backgroundColor = .secondarySystemBackground
+        bar.alpha = 0
         let spinner = UIActivityIndicatorView(style: .medium)
-        spinner.hidesWhenStopped = true
-        return spinner
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        spinner.startAnimating()
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = String(localized: "topic_detail.loading_earlier")
+        label.font = .systemFont(ofSize: 13)
+        label.textColor = .secondaryLabel
+        let stack = UIStackView(arrangedSubviews: [spinner, label])
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.axis = .horizontal
+        stack.spacing = 8
+        stack.alignment = .center
+        bar.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: bar.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: bar.centerYAnchor),
+            bar.heightAnchor.constraint(equalToConstant: 36),
+        ])
+        return bar
     }()
 
     private let bottomBar = TopicDetailBottomBar()
@@ -152,6 +181,7 @@ final class TopicDetailViewController: ObservableViewController {
         view.addSubview(activityIndicator)
         view.addSubview(errorLabel)
         view.addSubview(bottomBar)
+        view.addSubview(topLoadingBar)
 
         bottomBar.delegate = self
         tableView.tableFooterView = footerSpinner
@@ -172,6 +202,10 @@ final class TopicDetailViewController: ObservableViewController {
 
             bottomBar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             bottomBar.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
+
+            topLoadingBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            topLoadingBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topLoadingBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
         ])
 
         Task {
@@ -204,6 +238,7 @@ final class TopicDetailViewController: ObservableViewController {
             CATransaction.setDisableActions(true)
             tableView.scrollToRow(at: IndexPath(row: safeRow, section: 0), at: .top, animated: false)
             CATransaction.commit()
+            lastScrollOffset = tableView.contentOffset.y
         }
     }
 
@@ -240,11 +275,15 @@ final class TopicDetailViewController: ObservableViewController {
             tableView.tableFooterView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
         }
 
-        // Header spinner for loading earlier posts
+        // Top loading bar for loading earlier posts
         if viewModel.isLoadingEarlier {
-            headerSpinner.startAnimating()
+            UIView.animate(withDuration: 0.25) {
+                self.topLoadingBar.alpha = 1
+            }
         } else {
-            headerSpinner.stopAnimating()
+            UIView.animate(withDuration: 0.25) {
+                self.topLoadingBar.alpha = 0
+            }
         }
 
         // OP filter button state
@@ -292,21 +331,82 @@ final class TopicDetailViewController: ObservableViewController {
     private func updateTitleHeader() {
         let container = UIView()
         container.addSubview(titleLabel)
-        container.addSubview(headerSpinner)
+        container.addSubview(tagsContainer)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        headerSpinner.translatesAutoresizingMaskIntoConstraints = false
+
+        let tags = viewModel.topic?.tags ?? []
+        configureTags(tags)
+        let hasVisibleTags = !tags.isEmpty
+
         NSLayoutConstraint.activate([
-            headerSpinner.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
-            headerSpinner.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            titleLabel.topAnchor.constraint(equalTo: headerSpinner.bottomAnchor, constant: 4),
+            titleLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
             titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
-            titleLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
+            tagsContainer.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: hasVisibleTags ? 8 : 0),
+            tagsContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            tagsContainer.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -16),
+            tagsContainer.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -8),
         ])
         let targetSize = CGSize(width: tableView.bounds.width, height: UIView.layoutFittingCompressedSize.height)
         let size = container.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: .required, verticalFittingPriority: .fittingSizeLevel)
         container.frame.size = size
         tableView.tableHeaderView = container
+    }
+
+    private func configureTags(_ tags: [DiscourseTopicDetail.Tag]) {
+        tagsContainer.subviews.forEach { $0.removeFromSuperview() }
+        tagsContainer.constraints.forEach { tagsContainer.removeConstraint($0) }
+        guard !tags.isEmpty else { return }
+
+        let hSpacing: CGFloat = 6
+        let vSpacing: CGFloat = 6
+        let maxWidth = tableView.bounds.width - 32 // 16pt padding on each side
+
+        var buttons: [UIButton] = []
+        for tag in tags {
+            let button = UIButton(type: .system)
+            var config = UIButton.Configuration.filled()
+            config.title = tag.name
+            config.baseForegroundColor = .secondaryLabel
+            config.baseBackgroundColor = .secondarySystemFill
+            config.cornerStyle = .capsule
+            config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10)
+            config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+                var outgoing = incoming
+                outgoing.font = .systemFont(ofSize: 13, weight: .medium)
+                return outgoing
+            }
+            config.image = UIImage(systemName: "tag")
+            config.imagePadding = 4
+            config.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(pointSize: 10, weight: .medium)
+            button.configuration = config
+            let tagSlug = tag.slug
+            button.addAction(UIAction { [weak self] _ in
+                guard let self else { return }
+                let vc = TagTopicsViewController(api: self.api, tagName: tagSlug)
+                self.navigationController?.pushViewController(vc, animated: true)
+            }, for: .touchUpInside)
+            buttons.append(button)
+        }
+
+        // Flow layout: calculate positions with line wrapping
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        for button in buttons {
+            let size = button.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
+            if x + size.width > maxWidth, x > 0 {
+                x = 0
+                y += lineHeight + vSpacing
+                lineHeight = 0
+            }
+            button.frame = CGRect(x: x, y: y, width: size.width, height: size.height)
+            tagsContainer.addSubview(button)
+            x += size.width + hSpacing
+            lineHeight = max(lineHeight, size.height)
+        }
+        let totalHeight = y + lineHeight
+        tagsContainer.heightAnchor.constraint(equalToConstant: totalHeight).isActive = true
     }
 
     // MARK: - Emoji Title
@@ -526,6 +626,7 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
             // Show overlay while fetching; scroll is handled in viewDidLayoutSubviews via pendingScrollToFloor
             self.showJumpOverlay()
             self.hasTitleHeader = false
+            self.suppressLoadEarlier = true
             Task {
                 await self.viewModel.jumpToFloor(floor, containerWidth: self.view.bounds.width)
                 self.hideJumpOverlay()
@@ -577,9 +678,15 @@ extension TopicDetailViewController: UITableViewDelegate {
         let isScrollingUp = currentOffset < lastScrollOffset
         lastScrollOffset = currentOffset
 
+        // Clear suppress flag once user scrolls down, meaning they've settled after a jump
+        if !isScrollingUp {
+            suppressLoadEarlier = false
+        }
+
         // Only trigger load-earlier when user is actively scrolling UP
         // and within 200pt of the top — prevents false triggers after jump
         guard isScrollingUp,
+              !suppressLoadEarlier,
               viewModel.canLoadEarlier,
               !isLoadingEarlierLocally
         else { return }
