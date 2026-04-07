@@ -64,6 +64,34 @@ struct DiscourseTopicDetail: Decodable {
         let count: Int
     }
 
+    struct BoostUser: Decodable, Sendable {
+        let id: Int
+        let username: String
+        let name: String?
+        let avatarTemplate: String?
+//        let animatedAvatar: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, username, name
+            case avatarTemplate = "avatar_template"
+//            case animatedAvatar = "animated_avatar"
+        }
+    }
+
+    struct Boost: Decodable, Identifiable, Sendable {
+        let id: Int
+        let cooked: String
+        let canDelete: Bool?
+        let canFlag: Bool
+        let user: BoostUser
+
+        enum CodingKeys: String, CodingKey {
+            case id, cooked, user
+            case canDelete = "can_delete"
+            case canFlag = "can_flag"
+        }
+    }
+
     struct Post: Decodable, Identifiable {
         let id: Int
         let name: String?
@@ -85,6 +113,8 @@ struct DiscourseTopicDetail: Decodable {
         let reactionUsersCount: Int
         let currentUserReaction: Reaction?
         let currentUserUsedMainReaction: Bool
+        var boosts: [Boost]
+        var canBoost: Bool
 
         enum CodingKeys: String, CodingKey {
             case id, name, username, cooked
@@ -104,6 +134,8 @@ struct DiscourseTopicDetail: Decodable {
             case reactionUsersCount = "reaction_users_count"
             case currentUserReaction = "current_user_reaction"
             case currentUserUsedMainReaction = "current_user_used_main_reaction"
+            case boosts
+            case canBoost = "can_boost"
         }
 
         init(from decoder: Decoder) throws {
@@ -129,6 +161,8 @@ struct DiscourseTopicDetail: Decodable {
             reactionUsersCount = (try? container.decodeIfPresent(Int.self, forKey: .reactionUsersCount)) ?? 0
             currentUserReaction = try? container.decodeIfPresent(Reaction.self, forKey: .currentUserReaction)
             currentUserUsedMainReaction = (try? container.decodeIfPresent(Bool.self, forKey: .currentUserUsedMainReaction)) ?? false
+            boosts = (try? container.decodeIfPresent([Boost].self, forKey: .boosts)) ?? []
+            canBoost = (try? container.decodeIfPresent(Bool.self, forKey: .canBoost)) ?? false
         }
     }
 }

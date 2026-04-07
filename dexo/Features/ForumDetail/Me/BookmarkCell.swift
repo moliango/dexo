@@ -75,7 +75,7 @@ final class BookmarkCell: UITableViewCell {
         ])
     }
 
-    func configure(with bookmark: DiscourseBookmark, baseURL: String) {
+    func configure(with bookmark: DiscourseBookmark, assetBaseURL: String) {
         titleLabel.text = bookmark.title ?? bookmark.name
         excerptLabel.text = bookmark.excerpt?.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         if let createdAt = bookmark.createdAt {
@@ -86,7 +86,7 @@ final class BookmarkCell: UITableViewCell {
 
         if let template = bookmark.avatarTemplate {
             let sized = template.replacingOccurrences(of: "{size}", with: "96")
-            let urlString = sized.hasPrefix("http") ? sized : baseURL + sized
+            let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
             avatarImageView.sd_setImage(with: URL(string: urlString))
         } else {
             avatarImageView.image = nil

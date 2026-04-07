@@ -116,7 +116,7 @@ extension BookmarksViewController: UITableViewDataSource {
             return UITableViewCell()
         }
         let bookmark = viewModel.bookmarks[indexPath.row]
-        cell.configure(with: bookmark, baseURL: api.baseURL)
+        cell.configure(with: bookmark, assetBaseURL: api.assetBaseURL)
         cell.accessoryType = .disclosureIndicator
         return cell
     }

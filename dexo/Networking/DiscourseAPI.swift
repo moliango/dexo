@@ -3,6 +3,7 @@ import Foundation
 
 final class DiscourseAPI {
     let baseURL: String
+    let assetBaseURL: String
     private(set) var emojiReady: Bool = false
     private let interceptor: DiscourseAuthInterceptor
 
@@ -10,11 +11,13 @@ final class DiscourseAPI {
 
     init(forum: ForumInstance) {
         self.baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        self.assetBaseURL = forum.assetBaseURL
         self.interceptor = DiscourseAuthInterceptor(baseURL: baseURL)
     }
 
     init(baseURL: String) {
         self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        self.assetBaseURL = self.baseURL
         self.interceptor = DiscourseAuthInterceptor(baseURL: self.baseURL)
     }
 
@@ -127,12 +130,37 @@ final class DiscourseAPI {
         ])
     }
 
+    func createBoost(postId: Int, raw: String) async throws -> DiscourseTopicDetail.Boost {
+        try await request(
+            route: .createBoost(postId: postId),
+            parameters: ["raw": raw],
+            encoding: URLEncoding.httpBody,
+            headers: [
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "X-Requested-With": "XMLHttpRequest",
+            ]
+        )
+    }
+
     func deleteBookmark(id: Int) async throws {
         let route = DiscourseRouter.deleteBookmark(id: id)
         let url = baseURL + route.path
         let response = await session.request(url, method: route.method).serializingData().response
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to delete bookmark"], errorType: nil)
+        }
+    }
+
+    func deleteBoost(id: Int) async throws {
+        let route = DiscourseRouter.deleteBoost(id: id)
+        let url = baseURL + route.path
+        let response = await session.request(
+            url,
+            method: route.method,
+            headers: ["X-Requested-With": "XMLHttpRequest"]
+        ).serializingData().response
+        if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
+            throw DiscourseAPIError(messages: ["Failed to delete boost"], errorType: nil)
         }
     }
 
@@ -160,14 +188,14 @@ final class DiscourseAPI {
     }
 
     func loadOrFetchEmojiMap() async {
-        if EmojiStore.load(for: baseURL) {
+        if EmojiStore.load(for: baseURL, assetBaseURL: assetBaseURL) {
             emojiReady = true
             return
         }
         do {
             let groups: [String: [DiscourseEmojiEntry]] = try await request(route: .emojis)
             let entries = groups.values.flatMap { $0 }
-            EmojiStore.save(entries, for: baseURL)
+            EmojiStore.save(entries, for: baseURL, assetBaseURL: assetBaseURL)
             emojiReady = true
         } catch {
             // Silent failure — reactions won't show emoji images but functionality is unaffected
@@ -187,10 +215,10 @@ final class DiscourseAPI {
 
     // MARK: - Private
 
-    private func request<T: Decodable>(route: DiscourseRouter, parameters: Parameters? = nil) async throws -> T {
+    private func request<T: Decodable>(route: DiscourseRouter, parameters: Parameters? = nil, encoding: ParameterEncoding? = nil, headers: HTTPHeaders? = nil) async throws -> T {
         let url = baseURL + route.path
-        let encoding: ParameterEncoding = route.method == .post ? JSONEncoding.default : URLEncoding.default
-        let response = await session.request(url, method: route.method, parameters: parameters, encoding: encoding)
+        let resolvedEncoding = encoding ?? (route.method == .post ? JSONEncoding.default : URLEncoding.default)
+        let response = await session.request(url, method: route.method, parameters: parameters, encoding: resolvedEncoding, headers: headers)
             .serializingDecodable(T.self)
             .response
 
@@ -292,8 +320,12 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
                 }
                 let isMutating = request.httpMethod == "POST" || request.httpMethod == "PUT" || request.httpMethod == "DELETE"
                 if isMutating {
-                    request.setValue("application/json", forHTTPHeaderField: "Accept")
-                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    if request.value(forHTTPHeaderField: "Accept") == nil {
+                        request.setValue("application/json", forHTTPHeaderField: "Accept")
+                    }
+                    if request.value(forHTTPHeaderField: "Content-Type") == nil {
+                        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    }
                     getOrFetchCSRFToken(session: session) { [weak self] token in
                         if let token {
                             request.setValue(token, forHTTPHeaderField: "X-CSRF-Token")
@@ -306,8 +338,10 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
                 request.setValue(userApiKey, forHTTPHeaderField: "User-Api-Key")
             }
         }
-        request.setValue("application/json", forHTTPHeaderField: "Accept")
-        if request.httpMethod == "POST" {
+        if request.value(forHTTPHeaderField: "Accept") == nil {
+            request.setValue("application/json", forHTTPHeaderField: "Accept")
+        }
+        if request.httpMethod == "POST", request.value(forHTTPHeaderField: "Content-Type") == nil {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         completion(.success(request))

@@ -14,6 +14,7 @@ final class TopicDetailViewModel {
     var isFilteringByOP = false
     var isJumping = false
     var jumpTargetFloor: Int?
+    var expandedBoostPostIds: Set<Int> = []
     var errorMessage: String?
 
     private let api: DiscourseAPI
@@ -272,6 +273,36 @@ final class TopicDetailViewModel {
         } else {
             isReady = true
         }
+    }
+
+    func appendBoost(_ boost: DiscourseTopicDetail.Boost, toPostId postId: Int) {
+        guard var topic else { return }
+        guard let index = topic.postStream.posts.firstIndex(where: { $0.id == postId }) else { return }
+        if !topic.postStream.posts[index].boosts.contains(where: { $0.id == boost.id }) {
+            topic.postStream.posts[index].boosts.append(boost)
+        }
+        topic.postStream.posts[index].canBoost = false
+        expandedBoostPostIds.insert(postId)
+        self.topic = topic
+    }
+
+    func toggleBoosts(forPostId postId: Int) {
+        if expandedBoostPostIds.contains(postId) {
+            expandedBoostPostIds.remove(postId)
+        } else {
+            expandedBoostPostIds.insert(postId)
+        }
+    }
+
+    func removeBoost(boostId: Int, fromPostId postId: Int) {
+        guard var topic else { return }
+        guard let index = topic.postStream.posts.firstIndex(where: { $0.id == postId }) else { return }
+        topic.postStream.posts[index].boosts.removeAll { $0.id == boostId }
+        topic.postStream.posts[index].canBoost = true
+        if topic.postStream.posts[index].boosts.isEmpty {
+            expandedBoostPostIds.remove(postId)
+        }
+        self.topic = topic
     }
 
     // MARK: - Private

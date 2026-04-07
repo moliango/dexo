@@ -10,6 +10,9 @@ protocol PostCellDelegate: AnyObject {
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool)
     func postCell(didTapAvatarForUsername username: String)
     func postCell(didTapReaction reactionId: String, forPost post: DiscourseTopicDetail.Post)
+    func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post)
+    func postCell(didTapDeleteBoost boost: DiscourseTopicDetail.Boost)
+    func postCell(didTapToggleBoostsForPost post: DiscourseTopicDetail.Post)
 }
 
 final class PostWebViewCell: UITableViewCell {
@@ -202,6 +205,7 @@ final class PostWebViewCell: UITableViewCell {
         interactiveRegions: [InteractiveRegion],
         codeBlocks: [CodeBlockInfo],
         baseURL: String,
+        assetBaseURL: String,
         delegate: PostCellDelegate?,
         floorNumber: Int,
         postLink: String?
@@ -245,7 +249,7 @@ final class PostWebViewCell: UITableViewCell {
 
         if let template = post.avatarTemplate {
             let sized = template.replacingOccurrences(of: "{size}", with: "96")
-            let urlString = sized.hasPrefix("http") ? sized : baseURL + sized
+            let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
             if let url = URL(string: urlString) {
                 avatarImageView.sd_setImage(with: url)
             }

@@ -17,6 +17,9 @@
         }
       }
     },
+    "action.delete" : {
+
+    },
     "action.enable" : {
       "localizations" : {
         "en" : {
@@ -1369,6 +1372,9 @@
           }
         }
       }
+    },
+    "topic_detail.boost.delete.confirm" : {
+
     },
     "topic_detail.default_title" : {
       "localizations" : {

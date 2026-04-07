@@ -108,7 +108,7 @@ extension UserPostsViewController: UITableViewDataSource {
             return UITableViewCell()
         }
         let post = viewModel.searchResults[indexPath.row]
-        cell.configure(with: post, baseURL: api.baseURL)
+        cell.configure(with: post, assetBaseURL: api.assetBaseURL)
         cell.accessoryType = .disclosureIndicator
         return cell
     }

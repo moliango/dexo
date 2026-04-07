@@ -164,6 +164,15 @@ final class PostNativeCell: UITableViewCell {
         return button
     }()
 
+    private let boostButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        button.setImage(UIImage(systemName: "bolt", withConfiguration: config), for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
+
     private let bookmarkButton: UIButton = {
         let button = UIButton(type: .system)
         let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
@@ -229,6 +238,7 @@ final class PostNativeCell: UITableViewCell {
         reactionCountLabel.isHidden = true
         bottomLeftStack.addArrangedSubview(reactionStackView)
         contentView.addSubview(bottomLeftStack)
+        contentView.addSubview(boostButton)
         contentView.addSubview(bookmarkButton)
         contentView.addSubview(replyButton)
         contentView.addSubview(copyLinkButton)
@@ -288,6 +298,11 @@ final class PostNativeCell: UITableViewCell {
             copyLinkButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
             copyLinkButton.widthAnchor.constraint(equalToConstant: 28),
 
+            boostButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
+            boostButton.trailingAnchor.constraint(equalTo: bookmarkButton.leadingAnchor),
+            boostButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            boostButton.widthAnchor.constraint(equalToConstant: 28),
+
             bookmarkButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
             bookmarkButton.trailingAnchor.constraint(equalTo: copyLinkButton.leadingAnchor),
             bookmarkButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
@@ -303,6 +318,7 @@ final class PostNativeCell: UITableViewCell {
         copyLinkButton.addTarget(self, action: #selector(copyLinkTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
         sourceButton.addTarget(self, action: #selector(sourceButtonTapped), for: .touchUpInside)
+        boostButton.addTarget(self, action: #selector(boostButtonTapped), for: .touchUpInside)
         bookmarkButton.addTarget(self, action: #selector(bookmarkButtonTapped), for: .touchUpInside)
 
         avatarImageView.isUserInteractionEnabled = true
@@ -318,9 +334,12 @@ final class PostNativeCell: UITableViewCell {
         floorNumber: Int,
         postLink: String?,
         baseURL: String,
+        assetBaseURL: String,
         hasUnsupportedBlocks: Bool,
         cookedHTML: String,
         validReactions: [String],
+        isBoostsExpanded: Bool,
+        showsSeparator: Bool,
     ) {
         postId = post.id
         self.postLink = postLink
@@ -329,6 +348,7 @@ final class PostNativeCell: UITableViewCell {
         self.cookedHTML = cookedHTML
         self.validReactions = validReactions
         sourceButton.isHidden = !hasUnsupportedBlocks
+        separatorLine.isHidden = !showsSeparator
 
         nameLabel.text = post.name
         usernameLabel.text = post.username
@@ -375,6 +395,13 @@ final class PostNativeCell: UITableViewCell {
 
         // Reactions
         configureReactions(post.reactions, count: post.reactionUsersCount, baseURL: baseURL)
+
+        // Bookmark
+        let boostConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        boostButton.setImage(UIImage(systemName: isBoostsExpanded ? "bolt.fill" : "bolt", withConfiguration: boostConfig), for: .normal)
+        boostButton.tintColor = isBoostsExpanded ? .systemYellow : .tertiaryLabel
+        boostButton.isHidden = false
+        boostButton.isEnabled = true
 
         // Bookmark
         let bookmarkSymbol = post.bookmarked ? "bookmark.fill" : "bookmark"
@@ -613,6 +640,11 @@ final class PostNativeCell: UITableViewCell {
         }
     }
 
+    @objc private func boostButtonTapped() {
+        guard let post = currentPost else { return }
+        delegate?.postCell(didTapToggleBoostsForPost: post)
+    }
+
     @objc private func bookmarkButtonTapped() {
         guard let post = currentPost else { return }
         let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
@@ -672,12 +704,17 @@ final class PostNativeCell: UITableViewCell {
         reactionCountLabel.isHidden = true
         validReactions = []
         let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        boostButton.setImage(UIImage(systemName: "bolt", withConfiguration: config), for: .normal)
+        boostButton.tintColor = .tertiaryLabel
+        boostButton.isHidden = false
+        boostButton.isEnabled = true
         bookmarkButton.setImage(UIImage(systemName: "bookmark", withConfiguration: config), for: .normal)
         bookmarkButton.tintColor = .tertiaryLabel
         copyLinkButton.setImage(UIImage(systemName: "link", withConfiguration: config), for: .normal)
         copyLinkButton.tintColor = .tertiaryLabel
         sourceButton.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
         sourceButton.tintColor = .tertiaryLabel
+        separatorLine.isHidden = false
     }
 
     private static func formatDate(_ isoString: String) -> String {

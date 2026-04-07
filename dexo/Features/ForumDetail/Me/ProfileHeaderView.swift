@@ -176,7 +176,7 @@ final class ProfileHeaderView: UIView {
 //        loginButton.addTarget(self, action: #selector(loginTapped), for: .touchUpInside)
     }
 
-    func configure(user: DiscourseCurrentUser?, userProfile: DiscourseUserProfile?, summary: DiscourseUserSummary?, baseURL: String) {
+    func configure(user: DiscourseCurrentUser?, userProfile: DiscourseUserProfile?, summary: DiscourseUserSummary?, assetBaseURL: String) {
         if let user {
             loggedInContainer.isHidden = false
             loggedOutContainer.isHidden = true
@@ -187,7 +187,7 @@ final class ProfileHeaderView: UIView {
             let avatarTemplate = userProfile?.avatarTemplate ?? user.avatarTemplate
             if let template = avatarTemplate {
                 let sized = template.replacingOccurrences(of: "{size}", with: "240")
-                let urlString = sized.hasPrefix("http") ? sized : baseURL + sized
+                let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
                 avatarImageView.sd_setImage(with: URL(string: urlString))
             }
 

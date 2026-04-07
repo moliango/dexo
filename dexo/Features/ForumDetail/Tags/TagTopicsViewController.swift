@@ -82,11 +82,11 @@ final class TagTopicsViewController: ObservableViewController {
                   let topic = self.viewModel.topics.first(where: { $0.id == topicId }) else {
                 return UITableViewCell()
             }
-            let baseURL = self.api.baseURL
+            let assetBaseURL = self.api.assetBaseURL
             var avatarURL: URL?
             if let template = self.viewModel.avatarTemplate(for: topic) {
                 let sized = template.replacingOccurrences(of: "{size}", with: "96")
-                let urlString = sized.hasPrefix("http") ? sized : baseURL + sized
+                let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
                 avatarURL = URL(string: urlString)
             }
             cell.configure(

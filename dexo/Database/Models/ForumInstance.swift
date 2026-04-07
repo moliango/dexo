@@ -16,6 +16,23 @@ struct ForumInstance: Sendable, Codable, Identifiable, Equatable, Hashable,
     var addedAt: Date
     var sortOrder: Int
 
+    var assetBaseURL: String {
+        return baseURL
+//        guard let iconURL,
+//              let url = URL(string: iconURL),
+//              let scheme = url.scheme,
+//              let host = url.host
+//        else {
+//            return baseURL
+//        }
+//
+//        var components = URLComponents()
+//        components.scheme = scheme
+//        components.host = host
+//        components.port = url.port
+//        return components.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? baseURL
+    }
+
     static func new(title: String, baseURL: String, iconURL: String? = nil) -> ForumInstance {
         ForumInstance(
             id: nil,

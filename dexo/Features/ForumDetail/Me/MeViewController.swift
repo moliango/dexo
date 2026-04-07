@@ -92,10 +92,10 @@ final class MeViewController: ObservableViewController {
                 user: viewModel.currentUser,
                 userProfile: viewModel.userProfile,
                 summary: viewModel.summary,
-                baseURL: api.baseURL
+                assetBaseURL: api.assetBaseURL
             )
         } else {
-            profileHeader.configure(user: nil, userProfile: nil, summary: nil, baseURL: api.baseURL)
+            profileHeader.configure(user: nil, userProfile: nil, summary: nil, assetBaseURL: api.assetBaseURL)
         }
 
         layoutHeaderView()

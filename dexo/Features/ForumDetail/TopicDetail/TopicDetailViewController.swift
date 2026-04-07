@@ -3,11 +3,17 @@ import SafariServices
 import SDWebImage
 import UIKit
 
+private nonisolated enum TopicDetailItem: Hashable, Sendable {
+    case post(Int)
+    case boosts(Int)
+}
+
 final class TopicDetailViewController: ObservableViewController {
     private let viewModel: TopicDetailViewModel
     private let api: DiscourseAPI
     private let topicId: Int
     private let baseURL: String
+    private let assetBaseURL: String
     private var hasTitleHeader = false
     private var isLoadingEarlierLocally = false
     private var pendingScrollToFloor: Int?
@@ -21,50 +27,74 @@ final class TopicDetailViewController: ObservableViewController {
         let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(PostNativeCell.self, forCellReuseIdentifier: PostNativeCell.reuseIdentifier)
+        tv.register(BoostCell.self, forCellReuseIdentifier: BoostCell.reuseIdentifier)
         tv.delegate = self
         tv.separatorStyle = .none
         tv.isHidden = true
         return tv
     }()
 
-    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = .init(tableView: tableView) { [weak self] tableView, indexPath, postId in
-        guard let self,
-              let post = self.viewModel.posts.first(where: { $0.id == postId }),
-              let annotatedBlocks = self.viewModel.parsedBlocks[postId],
-              let cell = tableView.dequeueReusableCell(withIdentifier: PostNativeCell.reuseIdentifier, for: indexPath) as? PostNativeCell
-        else {
-            return UITableViewCell()
-        }
-        let visiblePosts = self.viewModel.visiblePosts
-        let floorNumber: Int
-        if self.viewModel.isFilteringByOP {
-            floorNumber = (visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
-        } else {
-            // Use stream-based floor number when not filtering
-            let allPostIds = self.viewModel.allPostIds
-            if let streamIndex = allPostIds.firstIndex(of: postId) {
-                floorNumber = streamIndex + 1
-            } else {
-                floorNumber = (visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
-            }
-        }
-        let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
-        let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
-        let hasUnsupported = self.viewModel.unsupportedPostIds.contains(postId)
+    private lazy var dataSource: UITableViewDiffableDataSource<Int, TopicDetailItem> = .init(tableView: tableView) { [weak self] tableView, indexPath, item in
+        guard let self else { return UITableViewCell() }
 
-        cell.configure(
-            with: post,
-            annotatedBlocks: annotatedBlocks,
-            config: config,
-            delegate: self,
-            floorNumber: floorNumber,
-            postLink: postLink,
-            baseURL: self.baseURL,
-            hasUnsupportedBlocks: hasUnsupported,
-            cookedHTML: post.cooked,
-            validReactions: self.viewModel.topic?.validReactions ?? [],
-        )
-        return cell
+        switch item {
+        case .post(let postId):
+            guard let post = self.viewModel.posts.first(where: { $0.id == postId }),
+                  let annotatedBlocks = self.viewModel.parsedBlocks[postId],
+                  let cell = tableView.dequeueReusableCell(withIdentifier: PostNativeCell.reuseIdentifier, for: indexPath) as? PostNativeCell
+            else {
+                return UITableViewCell()
+            }
+            let visiblePosts = self.viewModel.visiblePosts
+            let floorNumber: Int
+            if self.viewModel.isFilteringByOP {
+                floorNumber = (visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
+            } else {
+                // Use stream-based floor number when not filtering
+                let allPostIds = self.viewModel.allPostIds
+                if let streamIndex = allPostIds.firstIndex(of: postId) {
+                    floorNumber = streamIndex + 1
+                } else {
+                    floorNumber = (visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
+                }
+            }
+            let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
+            let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
+            let hasUnsupported = self.viewModel.unsupportedPostIds.contains(postId)
+
+            let isBoostsExpanded = self.viewModel.expandedBoostPostIds.contains(postId)
+            let showsSeparator = !isBoostsExpanded
+            cell.configure(
+                with: post,
+                annotatedBlocks: annotatedBlocks,
+                config: config,
+                delegate: self,
+                floorNumber: floorNumber,
+                postLink: postLink,
+                baseURL: self.baseURL,
+                assetBaseURL: self.assetBaseURL,
+                hasUnsupportedBlocks: hasUnsupported,
+                cookedHTML: post.cooked,
+                validReactions: self.viewModel.topic?.validReactions ?? [],
+                isBoostsExpanded: isBoostsExpanded,
+                showsSeparator: showsSeparator,
+            )
+            return cell
+
+        case .boosts(let postId):
+            guard let post = self.viewModel.posts.first(where: { $0.id == postId }),
+                  let cell = tableView.dequeueReusableCell(withIdentifier: BoostCell.reuseIdentifier, for: indexPath) as? BoostCell
+            else {
+                return UITableViewCell()
+            }
+            cell.configure(
+                post: post,
+                delegate: self,
+                assetBaseURL: self.assetBaseURL,
+                contentWidth: tableView.bounds.width - 24
+            )
+            return cell
+        }
     }
 
     private let activityIndicator: UIActivityIndicatorView = {
@@ -161,6 +191,7 @@ final class TopicDetailViewController: ObservableViewController {
         self.viewModel = TopicDetailViewModel(api: api)
         self.topicId = topicId
         self.baseURL = api.baseURL
+        self.assetBaseURL = api.assetBaseURL
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
@@ -230,7 +261,14 @@ final class TopicDetailViewController: ObservableViewController {
         // Execute deferred jump scroll after layout is complete
         if let floor = pendingScrollToFloor {
             pendingScrollToFloor = nil
-            let targetRow = viewModel.visibleRowForFloor(floor) ?? 0
+            guard let postIndex = viewModel.visibleRowForFloor(floor) else { return }
+            // Calculate actual row: add one boosts row per prior post that has boosts
+            var targetRow = postIndex
+            for i in 0..<postIndex {
+                if !viewModel.visiblePosts[i].boosts.isEmpty {
+                    targetRow += 1
+                }
+            }
             let rowCount = tableView.numberOfRows(inSection: 0)
             guard rowCount > 0 else { return }
             let safeRow = min(targetRow, rowCount - 1)
@@ -292,15 +330,19 @@ final class TopicDetailViewController: ObservableViewController {
         // Show posts — all visible posts that have parsed blocks
         if viewModel.isReady {
             tableView.isHidden = false
-            var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
+            var snapshot = NSDiffableDataSourceSnapshot<Int, TopicDetailItem>()
             snapshot.appendSections([0])
             var seen = Set<Int>()
-            let readyIds = viewModel.visiblePosts.compactMap { post -> Int? in
+            var items: [TopicDetailItem] = []
+            for post in viewModel.visiblePosts {
                 guard viewModel.parsedBlocks[post.id] != nil,
-                      seen.insert(post.id).inserted else { return nil }
-                return post.id
+                      seen.insert(post.id).inserted else { continue }
+                items.append(.post(post.id))
+                if self.viewModel.expandedBoostPostIds.contains(post.id) {
+                    items.append(.boosts(post.id))
+                }
             }
-            snapshot.appendItems(readyIds, toSection: 0)
+            snapshot.appendItems(items, toSection: 0)
 
             // Restore scroll position when earlier posts were prepended
             if let anchor = earlierLoadAnchor {
@@ -309,7 +351,7 @@ final class TopicDetailViewController: ObservableViewController {
                 CATransaction.setDisableActions(true)
                 dataSource.apply(snapshot, animatingDifferences: false)
                 tableView.layoutIfNeeded()
-                if let newIndexPath = dataSource.indexPath(for: anchor.postId) {
+                if let newIndexPath = dataSource.indexPath(for: TopicDetailItem.post(anchor.postId)) {
                     let newCellTop = tableView.rectForRow(at: newIndexPath).minY
                     tableView.contentOffset.y = newCellTop - anchor.cellTopOffset
                 }
@@ -489,17 +531,21 @@ final class TopicDetailViewController: ObservableViewController {
     // MARK: - Container Access
 
     private func replyButtonTapped() {
-        guard let authGate = findForumContainer() else { return }
+        guard let authGate = findAuthGating() else { return }
         authGate.requireAuth { [weak self] in
             self?.presentReplyComposer()
         }
     }
 
-    private func findForumContainer() -> ForumContainerViewController? {
+    private func findAuthGating() -> AuthGating? {
         var vc: UIViewController? = self
         while let parent = vc?.parent {
-            if let container = parent as? ForumContainerViewController {
-                return container
+            if let gate = parent as? AuthGating { return gate }
+            for child in parent.children {
+                if let gate = child as? AuthGating { return gate }
+                for grandchild in child.children {
+                    if let gate = grandchild as? AuthGating { return gate }
+                }
             }
             vc = parent
         }
@@ -541,7 +587,7 @@ final class TopicDetailViewController: ObservableViewController {
     private func parseTopicId(from url: URL) -> Int? {
         let components = url.pathComponents
         guard let tIndex = components.firstIndex(of: "t") else { return nil }
-        for i in (tIndex + 1) ..< components.count {
+        for i in (tIndex + 1)..<components.count {
             if let id = Int(components[i]) {
                 return id
             }
@@ -613,10 +659,17 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
 
             // If already loaded, just scroll
             if self.viewModel.isFloorLoaded(floor),
-               let visibleRow = self.viewModel.visibleRowForFloor(floor)
+               let postIndex = self.viewModel.visibleRowForFloor(floor)
             {
+                // Calculate actual row: add one boosts row per prior post that has boosts
+                var targetRow = postIndex
+                for i in 0..<postIndex {
+                    if !self.viewModel.visiblePosts[i].boosts.isEmpty {
+                        targetRow += 1
+                    }
+                }
                 self.tableView.scrollToRow(
-                    at: IndexPath(row: visibleRow, section: 0),
+                    at: IndexPath(row: targetRow, section: 0),
                     at: .top,
                     animated: true
                 )
@@ -694,8 +747,16 @@ extension TopicDetailViewController: UITableViewDelegate {
         if scrollView.contentOffset.y <= contentTop + 200 {
             // Capture anchor synchronously before any async work
             if let anchorIndexPath = tableView.indexPathsForVisibleRows?.first,
-               let anchorId = dataSource.itemIdentifier(for: anchorIndexPath)
+               let item = dataSource.itemIdentifier(for: anchorIndexPath)
             {
+                // Only use post items as anchor
+                let anchorId: Int
+                switch item {
+                case .post(let postId):
+                    anchorId = postId
+                case .boosts(let postId):
+                    anchorId = postId
+                }
                 let cellTopOffset = tableView.rectForRow(at: anchorIndexPath).minY - tableView.contentOffset.y
                 earlierLoadAnchor = (postId: anchorId, cellTopOffset: cellTopOffset)
             }
@@ -716,7 +777,6 @@ extension TopicDetailViewController: UITableViewDelegate {
             }
         }
     }
-
 }
 
 // MARK: - PostCellDelegate
@@ -773,17 +833,64 @@ extension TopicDetailViewController: PostCellDelegate {
         }
     }
 
+    func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post) {
+        guard let authGate = findAuthGating() else { return }
+        authGate.requireAuth { [weak self] in
+            self?.presentBoostComposer(for: post)
+        }
+    }
+
+    func postCell(didTapToggleBoostsForPost post: DiscourseTopicDetail.Post) {
+        viewModel.toggleBoosts(forPostId: post.id)
+        refreshBoostUI()
+    }
+
+    func postCell(didTapDeleteBoost boost: DiscourseTopicDetail.Boost) {
+        let alert = UIAlertController(
+            title: String(localized: "action.delete"),
+            message: String(localized: "topic_detail.boost.delete.confirm"),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "action.delete"), style: .destructive) { [weak self] _ in
+            guard let self else { return }
+            Task {
+                do {
+                    try await self.api.deleteBoost(id: boost.id)
+                    if let postId = self.viewModel.posts.first(where: { $0.boosts.contains(where: { $0.id == boost.id }) })?.id {
+                        self.viewModel.removeBoost(boostId: boost.id, fromPostId: postId)
+                        self.refreshBoostUI()
+                    }
+                } catch {
+                    let failureAlert = UIAlertController(
+                        title: String(localized: "reply.send.failed"),
+                        message: error.localizedDescription,
+                        preferredStyle: .alert
+                    )
+                    failureAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(failureAlert, animated: true)
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
     func postCell(didTapAvatarForUsername username: String) {
         let vc = UserProfileViewController(api: api, username: username)
         navigationController?.pushViewController(vc, animated: true)
     }
 
     func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) {
-        guard let authGate = findForumContainer() else { return }
+        guard let authGate = findAuthGating() else { return }
         authGate.requireAuth { [weak self] in
             guard let self else { return }
             self.presentReplyComposer(for: post)
         }
+    }
+
+    private func refreshBoostUI() {
+        updateUI()
+        tableView.reloadData()
     }
 
     private func presentReplyComposer(for post: DiscourseTopicDetail.Post? = nil) {
@@ -806,4 +913,40 @@ extension TopicDetailViewController: PostCellDelegate {
         }
         present(nav, animated: true)
     }
+
+    private func presentBoostComposer(for post: DiscourseTopicDetail.Post) {
+        let alert = UIAlertController(
+            title: String(localized: "reply.title.to \(post.username)"),
+            message: nil,
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = String(localized: "reply.placeholder")
+        }
+        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+        alert.addAction(UIAlertAction(title: String(localized: "reply.send"), style: .default) { [weak self, weak alert] _ in
+            guard let self,
+                  let raw = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !raw.isEmpty
+            else { return }
+
+            Task {
+                do {
+                    let boost = try await self.api.createBoost(postId: post.id, raw: raw)
+                    self.viewModel.appendBoost(boost, toPostId: post.id)
+                    self.refreshBoostUI()
+                } catch {
+                    let failureAlert = UIAlertController(
+                        title: String(localized: "reply.send.failed"),
+                        message: error.localizedDescription,
+                        preferredStyle: .alert
+                    )
+                    failureAlert.addAction(UIAlertAction(title: "OK", style: .default))
+                    self.present(failureAlert, animated: true)
+                }
+            }
+        })
+        present(alert, animated: true)
+    }
+
 }

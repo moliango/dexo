@@ -78,7 +78,7 @@ final class UserProfileViewController: ObservableViewController {
                 user: user,
                 userProfile: profile,
                 summary: viewModel.summary,
-                baseURL: api.baseURL
+                assetBaseURL: api.assetBaseURL
             )
         }
 

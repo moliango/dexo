@@ -75,7 +75,7 @@ final class SearchResultCell: UITableViewCell {
         ])
     }
 
-    func configure(with post: DiscourseSearchResult.SearchPost, baseURL: String) {
+    func configure(with post: DiscourseSearchResult.SearchPost, assetBaseURL: String) {
         // Strip HTML tags from headline for plain text display
         if let headline = post.topicTitleHeadline {
             titleLabel.text = headline.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
@@ -88,7 +88,7 @@ final class SearchResultCell: UITableViewCell {
 
         if let template = post.avatarTemplate {
             let sized = template.replacingOccurrences(of: "{size}", with: "96")
-            let urlString = sized.hasPrefix("http") ? sized : baseURL + sized
+            let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
             avatarImageView.sd_setImage(with: URL(string: urlString))
         } else {
             avatarImageView.image = nil

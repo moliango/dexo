@@ -78,7 +78,7 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         else {
             return UITableViewCell()
         }
-        cell.configure(with: post, baseURL: self.api.baseURL)
+        cell.configure(with: post, assetBaseURL: self.api.assetBaseURL)
         return cell
     }
 

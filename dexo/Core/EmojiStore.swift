@@ -26,17 +26,17 @@ enum EmojiStore {
     // Built once after load/fetch; queried per cell
     private(set) static var lookupMap: [String: String] = [:]
 
-    static func load(for baseURL: String) -> Bool {
+    static func load(for baseURL: String, assetBaseURL: String) -> Bool {
         let file = cacheFile(for: baseURL)
         guard let data = try? Data(contentsOf: file),
               let entries = try? JSONDecoder().decode([DiscourseEmojiEntry].self, from: data)
         else { return false }
-        buildLookup(from: entries, baseURL: baseURL)
+        buildLookup(from: entries, assetBaseURL: assetBaseURL)
         return true
     }
 
-    static func save(_ entries: [DiscourseEmojiEntry], for baseURL: String) {
-        buildLookup(from: entries, baseURL: baseURL)
+    static func save(_ entries: [DiscourseEmojiEntry], for baseURL: String, assetBaseURL: String) {
+        buildLookup(from: entries, assetBaseURL: assetBaseURL)
         let file = cacheFile(for: baseURL)
         guard let data = try? JSONEncoder().encode(entries) else { return }
         try? data.write(to: file, options: .atomic)
@@ -51,10 +51,10 @@ enum EmojiStore {
         return lookupMap[code]
     }
 
-    private static func buildLookup(from entries: [DiscourseEmojiEntry], baseURL: String) {
+    private static func buildLookup(from entries: [DiscourseEmojiEntry], assetBaseURL: String) {
         var map: [String: String] = [:]
         for entry in entries {
-            let url = entry.url.hasPrefix("http") ? entry.url : baseURL + entry.url
+            let url = entry.url.hasPrefix("http") ? entry.url : assetBaseURL + entry.url
             map[entry.name] = url
         }
         lookupMap = map

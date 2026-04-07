@@ -11,6 +11,7 @@ enum DiscourseRouter {
     case notifications
     case privateMessages(username: String)
     case createTopic
+    case createBoost(postId: Int)
     case postReplies(postId: Int)
     case categoryTopics(slug: String, id: Int, page: Int)
     case tagTopics(name: String, page: Int)
@@ -26,21 +27,22 @@ enum DiscourseRouter {
     case userProfile(username: String)
     case createBookmark
     case deleteBookmark(id: Int)
+    case deleteBoost(id: Int)
     case toggleReaction(postId: Int, reactionId: String)
-    
+
     var method: HTTPMethod {
         switch self {
-        case .createTopic, .createBookmark:
+        case .createTopic, .createBookmark, .createBoost:
             return .post
         case .toggleReaction:
             return .put
-        case .deleteBookmark:
+        case .deleteBookmark, .deleteBoost:
             return .delete
         default:
             return .get
         }
     }
-    
+
     var path: String {
         switch self {
         case .latestTopics(let page):
@@ -62,6 +64,8 @@ enum DiscourseRouter {
             return "/topics/private-messages/\(username).json"
         case .createTopic:
             return "/posts.json"
+        case .createBoost(let postId):
+            return "/discourse-boosts/posts/\(postId)/boosts"
         case .postReplies(let postId):
             return "/posts/\(postId)/replies.json"
         case .categoryTopics(let slug, let id, let page):
@@ -98,6 +102,8 @@ enum DiscourseRouter {
             return "/bookmarks.json"
         case .deleteBookmark(let id):
             return "/bookmarks/\(id).json"
+        case .deleteBoost(let id):
+            return "/discourse-boosts/boosts/\(id)"
         case .toggleReaction(let postId, let reactionId):
             let encoded = reactionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reactionId
             return "/discourse-reactions/posts/\(postId)/custom-reactions/\(encoded)/toggle.json"
