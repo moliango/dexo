@@ -254,6 +254,16 @@ final class IntegrationTests: XCTestCase {
         }
     }
 
+    func testRelativeURLsWithQueryResolved() {
+        let html = "<p><img src=\"/images/emoji/twemoji/open_mouth.png?v=15\"></p>"
+        let blocks = CookedHTMLParser.parse(html: html, baseURL: "https://linux.do")
+
+        guard case .image(let src, _, _, _, _) = blocks[0] else {
+            return XCTFail("Expected resolved image")
+        }
+        XCTAssertEqual(src, "https://linux.do/images/emoji/twemoji/open_mouth.png?v=15")
+    }
+
     // MARK: - Empty HTML
 
     func testEmptyHTML() {

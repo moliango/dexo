@@ -43,6 +43,30 @@ final class BlockExtractorTests: XCTestCase {
         }
     }
 
+    func testHeadingWithBlockChildrenSplitsLikeBrowser() {
+        let html = """
+        <h2><a name=\"anchor\"></a><div class=\"lightbox-wrapper\"><a class=\"lightbox\" href=\"https://cdn3.linux.do/original/img.png\"><img src=\"https://cdn3.linux.do/optimized/img_312x250.png\" alt=\"image\" width=\"312\" height=\"250\"></a></div></h2><p>After</p>
+        """
+        let blocks = CookedHTMLParser.parse(html: html)
+
+        XCTAssertEqual(blocks.count, 2)
+        if case .image(let src, let alt, let width, let height, let href) = blocks[0] {
+            XCTAssertEqual(src, "https://cdn3.linux.do/optimized/img_312x250.png")
+            XCTAssertEqual(alt, "image")
+            XCTAssertEqual(width, 312)
+            XCTAssertEqual(height, 250)
+            XCTAssertEqual(href, "https://cdn3.linux.do/original/img.png")
+        } else {
+            XCTFail("Expected block image, got \(blocks[0])")
+        }
+
+        if case .paragraph(let inlines) = blocks[1] {
+            XCTAssertEqual(inlines, [.text("After")])
+        } else {
+            XCTFail("Expected trailing paragraph, got \(blocks[1])")
+        }
+    }
+
     // MARK: - Code Block
 
     func testCodeBlock() {
@@ -235,5 +259,27 @@ final class BlockExtractorTests: XCTestCase {
         } else {
             XCTFail("Block 1 should be paragraph, got \(blocks[1])")
         }
+    }
+
+    func testStandaloneEmojiImageParsesAsBlockImage() {
+        let html = "<p><img src=\"/images/emoji/twemoji/open_mouth.png?v=15\" title=\":open_mouth:\" class=\"emoji only-emoji\" alt=\":open_mouth:\" width=\"20\" height=\"20\"></p>"
+        let blocks = CookedHTMLParser.parse(html: html, baseURL: "https://linux.do")
+        XCTAssertEqual(blocks.count, 1)
+        if case .image(let src, let alt, let width, let height, _) = blocks[0] {
+            XCTAssertEqual(src, "https://linux.do/images/emoji/twemoji/open_mouth.png?v=15")
+            XCTAssertEqual(alt, ":open_mouth:")
+            XCTAssertEqual(width, 20)
+            XCTAssertEqual(height, 20)
+        } else {
+            XCTFail("Expected block emoji image, got \(blocks[0])")
+        }
+    }
+
+    func testStandaloneEmojiImageCanBeRecognizedAsEmoji() {
+        let src = "https://linux.do/images/emoji/twemoji/open_mouth.png?v=15"
+        let alt = ":open_mouth:"
+        XCTAssertTrue(src.contains("/emoji/"))
+        XCTAssertTrue(alt.hasPrefix(":"))
+        XCTAssertTrue(alt.hasSuffix(":"))
     }
 }

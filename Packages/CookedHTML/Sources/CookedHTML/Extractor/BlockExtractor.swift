@@ -93,10 +93,7 @@ enum BlockExtractor {
             return extractParagraph(from: element, options: options)
 
         case "h1", "h2", "h3", "h4", "h5", "h6":
-            let level = Int(String(tagName.last!))!
-            let inlines = InlineExtractor.extract(from: element, options: options)
-            if inlines.isEmpty { return [] }
-            return [.heading(level: level, content: inlines)]
+            return extractHeading(from: element, level: Int(String(tagName.last!))!, options: options)
 
         case "pre":
             return extractCodeBlock(from: element)
@@ -190,6 +187,30 @@ enum BlockExtractor {
         let inlines = InlineExtractor.extract(from: element, options: options)
         if inlines.isEmpty { return [] }
         return [.paragraph(inlines)]
+    }
+
+    private static func extractHeading(from element: Element, level: Int, options: ParseOptions) -> [ContentBlock] {
+        var blocks: [ContentBlock] = []
+        var pendingInlineNodes: [InlineNode] = []
+
+        func flushHeading() {
+            let inlines = sanitizeInlineNodes(pendingInlineNodes).trimmedWhitespace()
+            guard !inlines.isEmpty else { return }
+            blocks.append(.heading(level: level, content: inlines))
+            pendingInlineNodes.removeAll()
+        }
+
+        for child in element.getChildNodes() {
+            if let childElement = child as? Element, isBlockElement(childElement) {
+                flushHeading()
+                blocks.append(contentsOf: extractNode(childElement, options: options))
+                continue
+            }
+            pendingInlineNodes.append(contentsOf: InlineExtractor.extractNode(child, options: options))
+        }
+
+        flushHeading()
+        return blocks
     }
 
     private static func extractCodeBlock(from element: Element) -> [ContentBlock] {
@@ -329,6 +350,23 @@ enum BlockExtractor {
     }
 
     // MARK: - Helpers
+
+    private static func sanitizeInlineNodes(_ nodes: [InlineNode]) -> [InlineNode] {
+        nodes.compactMap { node in
+            switch node {
+            case .link(let href, let children):
+                let sanitizedChildren = sanitizeInlineNodes(children)
+                if href.isEmpty && sanitizedChildren.isEmpty {
+                    return nil
+                }
+                return .link(href: href, children: sanitizedChildren)
+            case .spoiler(let children):
+                return .spoiler(children: sanitizeInlineNodes(children))
+            default:
+                return node
+            }
+        }
+    }
 
     private static func isBlockElement(_ element: Element) -> Bool {
         blockTags.contains(element.tagName().lowercased())

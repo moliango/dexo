@@ -382,12 +382,24 @@ private final class BoostChipView: UIView {
                     let normalized = normalize(first.content)
                     if !normalized.isEmpty { return normalized }
                 }
+            case .image(let src, let alt, let width, let height, _):
+                return [.image(
+                    src: src,
+                    alt: alt,
+                    width: width,
+                    height: height,
+                    isEmoji: isEmojiImage(src: src, alt: alt, width: width, height: height)
+                )]
             case .rawHTML(let html):
                 let plainText = stripHTML(html)
                 if !plainText.isEmpty { return [.text(plainText)] }
             default:
                 continue
             }
+        }
+
+        if let emojiURL = extractSingleEmojiURL(from: cooked) {
+            return [.image(src: emojiURL, alt: nil, width: 20, height: 20, isEmoji: true)]
         }
 
         let fallback = stripHTML(cooked)
@@ -415,6 +427,29 @@ private final class BoostChipView: UIView {
             .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
             .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func isEmojiImage(src: String, alt: String?, width: Int?, height: Int?) -> Bool {
+        if let width, let height, width <= 24, height <= 24 {
+            return true
+        }
+        if src.contains("/emoji/") || src.contains("twemoji") {
+            return true
+        }
+        if let alt, alt.hasPrefix(":"), alt.hasSuffix(":") {
+            return true
+        }
+        return false
+    }
+
+    private static func extractSingleEmojiURL(from cooked: String) -> String? {
+        let pattern = #"<img[^>]+src=\"([^\"]+)\"[^>]*class=\"[^\"]*emoji[^\"]*\"[^>]*>"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+        let range = NSRange(cooked.startIndex..., in: cooked)
+        guard let match = regex.firstMatch(in: cooked, range: range),
+              let srcRange = Range(match.range(at: 1), in: cooked)
+        else { return nil }
+        return String(cooked[srcRange])
     }
 
     private func loadInlineImages(in textView: UITextView) {

@@ -20,16 +20,22 @@ enum URLResolver {
         guard let base = URL(string: baseURL) else { return urlString }
 
         if urlString.hasPrefix("/") {
-            // Absolute path — resolve against scheme + host
+            // Absolute path — resolve against scheme + host, preserving query/fragment.
             var components = URLComponents()
             components.scheme = base.scheme
             components.host = base.host
             components.port = base.port
-            components.path = urlString
+            if let resolved = URL(string: urlString, relativeTo: components.url)?.absoluteURL {
+                return resolved.absoluteString
+            }
+            components.percentEncodedPath = urlString
             return components.url?.absoluteString ?? urlString
         }
 
         // Relative path
+        if let resolved = URL(string: urlString, relativeTo: base)?.absoluteURL {
+            return resolved.absoluteString
+        }
         return base.appendingPathComponent(urlString).absoluteString
     }
 }
