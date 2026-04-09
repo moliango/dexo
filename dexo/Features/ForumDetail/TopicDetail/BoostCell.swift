@@ -236,6 +236,8 @@ private final class BoostChipView: UIView {
         textView.isScrollEnabled = false
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
+        textView.textContainer.maximumNumberOfLines = 1
+        textView.textContainer.lineBreakMode = .byWordWrapping
         textView.backgroundColor = .clear
         textView.dataDetectorTypes = []
         textView.linkTextAttributes = [.foregroundColor: UIColor.link]
@@ -311,16 +313,16 @@ private final class BoostChipView: UIView {
         )
 
         let textX = avatarImageView.frame.maxX + Layout.textSpacing
-        let maxTextWidth = max(
+        let textWidth = max(
             Layout.minimumTextWidth,
             bounds.width - textX - Layout.trailingPadding
         )
-        let textSize = measuredTextSize(maxWidth: maxTextWidth)
+        let textHeight = max(ceil(textFont.lineHeight), ceil(textView.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude)).height))
         textView.frame = CGRect(
             x: textX,
-            y: max(contentY, (bounds.height - textSize.height) / 2),
-            width: min(maxTextWidth, textSize.width),
-            height: textSize.height
+            y: max(contentY, (bounds.height - textHeight) / 2),
+            width: textWidth,
+            height: textHeight
         )
 
         layer.cornerRadius = bounds.height / 2
@@ -355,101 +357,26 @@ private final class BoostChipView: UIView {
             return CGSize(width: Layout.minimumTextWidth, height: lineHeight)
         }
 
-        let rect = attributedText.boundingRect(
-            with: CGSize(width: maxWidth, height: .greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            context: nil
-        )
+        let size = textView.sizeThatFits(CGSize(width: maxWidth, height: .greatestFiniteMagnitude))
         return CGSize(
-            width: max(Layout.minimumTextWidth, ceil(rect.width)),
-            height: max(ceil(textFont.lineHeight), ceil(rect.height))
+            width: max(Layout.minimumTextWidth, ceil(size.width)),
+            height: max(ceil(textFont.lineHeight), ceil(size.height))
         )
     }
 
     private static func inlineNodes(from cooked: String, baseURL: String) -> [InlineNode] {
         let blocks = CookedHTMLParser.parse(html: cooked, baseURL: baseURL)
-
-        for block in blocks {
-            switch block {
-            case .paragraph(let inlines):
-                let normalized = normalize(inlines)
-                if !normalized.isEmpty { return normalized }
-            case .heading(_, let inlines):
-                let normalized = normalize(inlines)
-                if !normalized.isEmpty { return normalized }
-            case .list(_, let items):
-                if let first = items.first {
-                    let normalized = normalize(first.content)
-                    if !normalized.isEmpty { return normalized }
-                }
-            case .image(let src, let alt, let width, let height, _):
-                return [.image(
-                    src: src,
-                    alt: alt,
-                    width: width,
-                    height: height,
-                    isEmoji: isEmojiImage(src: src, alt: alt, width: width, height: height)
-                )]
-            case .rawHTML(let html):
-                let plainText = stripHTML(html)
-                if !plainText.isEmpty { return [.text(plainText)] }
-            default:
-                continue
-            }
+        guard let first = blocks.first else { return [.text("")] }
+        switch first {
+        case .paragraph(let inlines) where !inlines.isEmpty:
+            return inlines.flatMap { node -> [InlineNode] in
+                node == .lineBreak ? [.text(" ")] : [node]
+            }.trimmedWhitespace()
+        case .image(let src, let alt, let width, let height, _):
+            return [.image(src: src, alt: alt, width: width, height: height, isEmoji: true)]
+        default:
+            return [.text("")]
         }
-
-        if let emojiURL = extractSingleEmojiURL(from: cooked) {
-            return [.image(src: emojiURL, alt: nil, width: 20, height: 20, isEmoji: true)]
-        }
-
-        let fallback = stripHTML(cooked)
-        return fallback.isEmpty ? [.text("")] : [.text(fallback)]
-    }
-
-    private static func normalize(_ nodes: [InlineNode]) -> [InlineNode] {
-        nodes.flatMap { node -> [InlineNode] in
-            switch node {
-            case .lineBreak:
-                return [.text(" ")]
-            case .link(let href, let children):
-                return [.link(href: href, children: normalize(children))]
-            case .spoiler(let children):
-                return [.spoiler(children: normalize(children))]
-            default:
-                return [node]
-            }
-        }
-        .trimmedWhitespace()
-    }
-
-    private static func stripHTML(_ html: String) -> String {
-        html
-            .replacingOccurrences(of: "<[^>]+>", with: " ", options: .regularExpression)
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func isEmojiImage(src: String, alt: String?, width: Int?, height: Int?) -> Bool {
-        if let width, let height, width <= 24, height <= 24 {
-            return true
-        }
-        if src.contains("/emoji/") || src.contains("twemoji") {
-            return true
-        }
-        if let alt, alt.hasPrefix(":"), alt.hasSuffix(":") {
-            return true
-        }
-        return false
-    }
-
-    private static func extractSingleEmojiURL(from cooked: String) -> String? {
-        let pattern = #"<img[^>]+src=\"([^\"]+)\"[^>]*class=\"[^\"]*emoji[^\"]*\"[^>]*>"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-        let range = NSRange(cooked.startIndex..., in: cooked)
-        guard let match = regex.firstMatch(in: cooked, range: range),
-              let srcRange = Range(match.range(at: 1), in: cooked)
-        else { return nil }
-        return String(cooked[srcRange])
     }
 
     private func loadInlineImages(in textView: UITextView) {

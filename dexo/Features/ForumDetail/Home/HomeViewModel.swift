@@ -113,6 +113,12 @@ final class HomeViewModel {
         }
     }
 
+    func reloadCategories() async {
+        categoriesById.removeAll()
+        categories.removeAll()
+        await loadCategoriesIfNeeded()
+    }
+
     private func loadCategoriesIfNeeded() async {
         guard categoriesById.isEmpty else { return }
         do {

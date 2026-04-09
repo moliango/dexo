@@ -15,12 +15,14 @@ struct DiscourseSearchResult: Decodable {
         let username: String
         let avatarTemplate: String?
         let blurb: String?
+        let postNumber: Int?
         let topicId: Int
         let topicTitleHeadline: String?
 
         enum CodingKeys: String, CodingKey {
             case id, username, blurb
             case avatarTemplate = "avatar_template"
+            case postNumber = "post_number"
             case topicId = "topic_id"
             case topicTitleHeadline = "topic_title_headline"
         }

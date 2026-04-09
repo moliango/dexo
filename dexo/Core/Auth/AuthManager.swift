@@ -23,6 +23,9 @@ final class AuthManager: @unchecked Sendable {
     func login(forum: ForumInstance, presentationAnchor: ASPresentationAnchor) async throws {
         let baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 
+        // Clean up any existing web login data to ensure isolation
+        cleanupWebAuthData(for: baseURL)
+
         // 1. Generate RSA key pair
         let privateKey: SecKey
         do {
@@ -156,20 +159,7 @@ final class AuthManager: @unchecked Sendable {
         KeychainHelper.deleteRSAKeyPair(for: baseURL)
 
         // 9. Fetch current user to get username
-        let api = DiscourseAPI(baseURL: baseURL)
-        do {
-            let currentUser = try await api.fetchNotifications()
-            usernameCache[baseURL] = currentUser.username
-
-            // Persist username to DB
-            if var forumToUpdate = forum as ForumInstance? {
-                forumToUpdate.username = currentUser.username
-                _ = try? DatabaseManager.shared.saveForum(&forumToUpdate)
-            }
-        } catch {
-            // Login succeeded but we couldn't fetch username — not fatal
-            // The API key is already saved, user is authenticated
-        }
+        await fetchAndCacheUsername(baseURL: baseURL, forum: forum)
     }
 
     static let webAuthSentinel = "__web__"
@@ -178,20 +168,67 @@ final class AuthManager: @unchecked Sendable {
     /// Saves the sentinel key so isAuthenticated returns true, then fetches the username.
     func loginViaWeb(forum: ForumInstance, cookies: [HTTPCookie], userAgent: String?) async {
         let baseURL = forum.baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        // Clean up any existing API key login data to ensure isolation
+        cleanupApiKeyAuthData(for: baseURL)
+
         WebCookieStore.shared.setCookies(cookies)
         WebCookieStore.shared.userAgent = userAgent
         try? KeychainHelper.saveUserApiKey(AuthManager.webAuthSentinel, for: baseURL)
 
+        await fetchAndCacheUsername(baseURL: baseURL, forum: forum)
+    }
+
+    // MARK: - Username Fetching
+
+    /// Fetches the current user's username via `/session/current.json`, falling back to `/notifications.json`.
+    private func fetchAndCacheUsername(baseURL: String, forum: ForumInstance) async {
         let api = DiscourseAPI(baseURL: baseURL)
-        do {
-            let currentUser = try await api.fetchNotifications()
-            usernameCache[baseURL] = currentUser.username
-            var forumToUpdate = forum
-            forumToUpdate.username = currentUser.username
-            _ = try? DatabaseManager.shared.saveForum(&forumToUpdate)
-        } catch {
-            // Cookie auth worked but username fetch failed — still authenticated
+        var username: String?
+
+        // Primary: /session/current.json
+        if let currentUser = try? await api.fetchCurrentUser() {
+            username = currentUser.username
         }
+
+        // Fallback: extract from /notifications.json pagination URL
+        if username == nil, let notifList = try? await api.fetchNotifications() {
+            username = notifList.username
+        }
+
+        guard let username else { return }
+        usernameCache[baseURL] = username
+        var forumToUpdate = forum
+        forumToUpdate.username = username
+        _ = try? DatabaseManager.shared.saveForum(&forumToUpdate)
+    }
+
+    // MARK: - Auth Isolation Helpers
+
+    /// Cleans up web login artifacts (cookies, user agent, CSRF) before switching to API key auth.
+    private func cleanupWebAuthData(for baseURL: String) {
+        if let existingKey = KeychainHelper.getUserApiKey(for: baseURL),
+           existingKey == AuthManager.webAuthSentinel {
+            // Server-side session cleanup
+            if let username = usernameCache[baseURL] {
+                let api = DiscourseAPI(baseURL: baseURL)
+                Task { await api.deleteSession(username: username) }
+            }
+        }
+        WebCookieStore.shared.clearCookies(for: baseURL)
+        NotificationCenter.default.post(name: .discourseAuthDidChange, object: nil, userInfo: ["baseURL": baseURL])
+    }
+
+    /// Cleans up API key artifacts (revoke key, delete RSA pair) before switching to web auth.
+    private func cleanupApiKeyAuthData(for baseURL: String) {
+        if let existingKey = KeychainHelper.getUserApiKey(for: baseURL),
+           existingKey != AuthManager.webAuthSentinel {
+            // Revoke the API key on the server
+            let api = DiscourseAPI(baseURL: baseURL)
+            Task { await api.revokeApiKey(apiKey: existingKey) }
+        }
+        KeychainHelper.deleteUserApiKey(for: baseURL)
+        KeychainHelper.deleteRSAKeyPair(for: baseURL)
     }
 
     func logout(forum: ForumInstance) {
@@ -214,6 +251,7 @@ final class AuthManager: @unchecked Sendable {
         KeychainHelper.deleteRSAKeyPair(for: baseURL)
         WebCookieStore.shared.clearCookies(for: baseURL)
         usernameCache.removeValue(forKey: baseURL)
+        NotificationCenter.default.post(name: .discourseAuthDidChange, object: nil, userInfo: ["baseURL": baseURL])
 
         // Clear username from DB
         var forumToUpdate = forum
@@ -227,6 +265,13 @@ final class AuthManager: @unchecked Sendable {
             usernameCache[baseURL] = username
         }
     }
+}
+
+// MARK: - Notifications
+
+extension Notification.Name {
+    /// Posted when auth method changes for a forum, so interceptors can reset cached state (e.g. CSRF token).
+    static let discourseAuthDidChange = Notification.Name("discourseAuthDidChange")
 }
 
 // MARK: - Errors

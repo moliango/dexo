@@ -18,7 +18,20 @@
       }
     },
     "action.delete" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除"
+          }
+        }
+      }
     },
     "action.enable" : {
       "localizations" : {
@@ -277,7 +290,20 @@
       }
     },
     "forum.overlay.close" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "关闭"
+          }
+        }
+      }
     },
     "home.filter.all_categories" : {
       "localizations" : {
@@ -919,23 +945,6 @@
         }
       }
     },
-    "search.filter.no_tags" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No Tags"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "暂无标签"
-          }
-        }
-      }
-    },
     "search.no_results" : {
       "localizations" : {
         "en" : {
@@ -979,7 +988,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最新"
+            "value" : "最新帖子"
           }
         }
       }
@@ -989,13 +998,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Recently Read"
+            "value" : "Latest Topic"
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "最近阅读"
+            "value" : "最新话题"
           }
         }
       }
@@ -1028,6 +1037,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "浏览最多"
+          }
+        }
+      }
+    },
+    "search.sort.read" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Latest Read"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近阅读"
           }
         }
       }
@@ -1374,7 +1399,14 @@
       }
     },
     "topic_detail.boost.delete.confirm" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete"
+          }
+        }
+      }
     },
     "topic_detail.default_title" : {
       "localizations" : {
@@ -1442,7 +1474,20 @@
       }
     },
     "topic_detail.loading_earlier" : {
-
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "loading"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载中"
+          }
+        }
+      }
     },
     "user.posts_title" : {
       "localizations" : {
@@ -1504,23 +1549,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录"
-          }
-        }
-      }
-    },
-    "weblogin.waiting" : {
-      "extractionState" : "stale",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Waiting for login…"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "等待登录…"
           }
         }
       }

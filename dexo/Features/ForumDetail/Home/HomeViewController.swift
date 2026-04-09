@@ -118,13 +118,14 @@ final class HomeViewController: ObservableViewController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
-        let navBottom = navigationController?.navigationBar.frame.maxY ?? 0
-        let segHeight: CGFloat = 44
-        let topInset = navBottom + segHeight + 8
+        let segBottom = segmentedControl.frame.maxY + 8
+        let safeTop = view.safeAreaInsets.top
+        let extraInset = segBottom - safeTop
 
-        guard tableView.contentInset.top != topInset else { return }
-        tableView.contentInset.top = topInset
-        tableView.verticalScrollIndicatorInsets.top = topInset
+        if tableView.contentInset.top != extraInset {
+            tableView.contentInset.top = extraInset
+        }
+        tableView.verticalScrollIndicatorInsets.top = extraInset
     }
 
     override func viewDidLoad() {
@@ -133,7 +134,6 @@ final class HomeViewController: ObservableViewController {
 
         tableView.tableFooterView = footerSpinner
         tableView.refreshControl = refreshControl
-        tableView.contentInsetAdjustmentBehavior = .never
 
         tableView.tableHeaderView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
         view.addSubview(tableView)
@@ -281,7 +281,7 @@ final class HomeViewController: ObservableViewController {
         authGate?.requireAuth { [weak self] in
             guard let self else { return }
             Task {
-                await self.viewModel.loadTopics()
+                await self.viewModel.reloadCategories()
             }
         }
     }

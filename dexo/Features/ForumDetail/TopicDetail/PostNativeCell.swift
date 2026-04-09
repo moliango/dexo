@@ -166,9 +166,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let boostButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
-        button.setImage(UIImage(systemName: "bolt", withConfiguration: config), for: .normal)
-        button.tintColor = .tertiaryLabel
+        button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
@@ -301,7 +299,6 @@ final class PostNativeCell: UITableViewCell {
             boostButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
             boostButton.trailingAnchor.constraint(equalTo: bookmarkButton.leadingAnchor),
             boostButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            boostButton.widthAnchor.constraint(equalToConstant: 28),
 
             bookmarkButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
             bookmarkButton.trailingAnchor.constraint(equalTo: copyLinkButton.leadingAnchor),
@@ -396,10 +393,14 @@ final class PostNativeCell: UITableViewCell {
         // Reactions
         configureReactions(post.reactions, count: post.reactionUsersCount, baseURL: baseURL)
 
-        // Bookmark
+        // Boost
+        let boostCount = post.boosts.count
+        let hasMine = post.boosts.contains { $0.canDelete == true }
         let boostConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
-        boostButton.setImage(UIImage(systemName: isBoostsExpanded ? "bolt.fill" : "bolt", withConfiguration: boostConfig), for: .normal)
-        boostButton.tintColor = isBoostsExpanded ? .systemYellow : .tertiaryLabel
+        let boostIcon = (isBoostsExpanded || hasMine) ? "bolt.fill" : "bolt"
+        boostButton.setImage(UIImage(systemName: boostIcon, withConfiguration: boostConfig), for: .normal)
+        boostButton.setTitle(boostCount > 0 ? " \(boostCount)" : nil, for: .normal)
+        boostButton.tintColor = hasMine ? .systemYellow : .tertiaryLabel
         boostButton.isHidden = false
         boostButton.isEnabled = true
 
@@ -642,7 +643,11 @@ final class PostNativeCell: UITableViewCell {
 
     @objc private func boostButtonTapped() {
         guard let post = currentPost else { return }
-        delegate?.postCell(didTapToggleBoostsForPost: post)
+        if post.boosts.isEmpty {
+            delegate?.postCell(didTapBoostForPost: post)
+        } else {
+            delegate?.postCell(didTapToggleBoostsForPost: post)
+        }
     }
 
     @objc private func bookmarkButtonTapped() {
@@ -705,6 +710,7 @@ final class PostNativeCell: UITableViewCell {
         validReactions = []
         let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         boostButton.setImage(UIImage(systemName: "bolt", withConfiguration: config), for: .normal)
+        boostButton.setTitle(nil, for: .normal)
         boostButton.tintColor = .tertiaryLabel
         boostButton.isHidden = false
         boostButton.isEnabled = true

@@ -8,6 +8,7 @@ final class UserPostsViewModel {
     }
 
     var searchResults: [DiscourseSearchResult.SearchPost] = []
+    private(set) var topicsById: [Int: DiscourseSearchResult.SearchTopic] = [:]
     var isLoading = false
     var canLoadMore = false
     var errorMessage: String?
@@ -32,6 +33,7 @@ final class UserPostsViewModel {
         do {
             let result = try await api.search(term: query, page: 0)
             searchResults = result.posts ?? []
+            topicsById = Self.buildTopicsMap(from: result)
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             errorMessage = error.localizedDescription
@@ -51,12 +53,18 @@ final class UserPostsViewModel {
             let existingIds = Set(searchResults.map(\.id))
             let filtered = newPosts.filter { !existingIds.contains($0.id) }
             searchResults.append(contentsOf: filtered)
+            topicsById.merge(Self.buildTopicsMap(from: result)) { _, new in new }
             currentPage = nextPage
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             canLoadMore = false
         }
         isLoading = false
+    }
+
+    private static func buildTopicsMap(from result: DiscourseSearchResult) -> [Int: DiscourseSearchResult.SearchTopic] {
+        guard let topics = result.topics else { return [:] }
+        return Dictionary(uniqueKeysWithValues: topics.map { ($0.id, $0) })
     }
 
     private func buildQuery() -> String {

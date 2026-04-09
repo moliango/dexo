@@ -186,12 +186,15 @@ final class TopicDetailViewController: ObservableViewController {
         return v
     }()
 
-    init(api: DiscourseAPI, topicId: Int) {
+    private var initialFloor: Int?
+
+    init(api: DiscourseAPI, topicId: Int, initialFloor: Int? = nil) {
         self.api = api
         self.viewModel = TopicDetailViewModel(api: api)
         self.topicId = topicId
         self.baseURL = api.baseURL
         self.assetBaseURL = api.assetBaseURL
+        self.initialFloor = initialFloor
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
@@ -241,6 +244,11 @@ final class TopicDetailViewController: ObservableViewController {
 
         Task {
             await viewModel.loadTopic(id: topicId, containerWidth: view.bounds.width)
+            if let floor = initialFloor, floor > 1 {
+                initialFloor = nil
+                suppressLoadEarlier = true
+                await viewModel.jumpToFloor(floor, containerWidth: view.bounds.width)
+            }
         }
         Task {
             await api.loadOrFetchEmojiMap()

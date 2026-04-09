@@ -2,18 +2,20 @@ import Foundation
 
 enum SearchSortOrder: String, CaseIterable {
     case relevance
+    case latestTopic = "latest_topic"
     case latest
     case likes
     case views
-    case latestTopic = "latest_topic"
+    case read
 
     var displayName: String {
         switch self {
         case .relevance: String(localized: "search.sort.relevance")
+        case .latestTopic: String(localized: "search.sort.latest_topic")
         case .latest: String(localized: "search.sort.latest")
         case .likes: String(localized: "search.sort.most_likes")
         case .views: String(localized: "search.sort.most_views")
-        case .latestTopic: String(localized: "search.sort.latest_topic")
+        case .read: String(localized: "search.sort.read")
         }
     }
 }
@@ -21,6 +23,7 @@ enum SearchSortOrder: String, CaseIterable {
 @Observable
 final class SearchViewModel {
     var searchResults: [DiscourseSearchResult.SearchPost] = []
+    private(set) var topicsById: [Int: DiscourseSearchResult.SearchTopic] = [:]
     var isSearching = false
     var canLoadMore = false
     var hasSearched = false
@@ -77,9 +80,11 @@ final class SearchViewModel {
         do {
             let result = try await api.search(term: query, page: 0)
             searchResults = result.posts ?? []
+            topicsById = Self.buildTopicsMap(from: result)
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             searchResults = []
+            topicsById = [:]
             canLoadMore = false
             errorMessage = error.localizedDescription
         }
@@ -98,12 +103,18 @@ final class SearchViewModel {
             let existingIds = Set(searchResults.map(\.id))
             let filtered = newPosts.filter { !existingIds.contains($0.id) }
             searchResults.append(contentsOf: filtered)
+            topicsById.merge(Self.buildTopicsMap(from: result)) { _, new in new }
             currentPage = nextPage
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             canLoadMore = false
         }
         isSearching = false
+    }
+
+    private static func buildTopicsMap(from result: DiscourseSearchResult) -> [Int: DiscourseSearchResult.SearchTopic] {
+        guard let topics = result.topics else { return [:] }
+        return Dictionary(uniqueKeysWithValues: topics.map { ($0.id, $0) })
     }
 
     private func buildQuery(term: String) -> String {

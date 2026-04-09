@@ -78,7 +78,8 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         else {
             return UITableViewCell()
         }
-        cell.configure(with: post, assetBaseURL: self.api.assetBaseURL)
+        let topicTitle = self.viewModel.topicsById[post.topicId]?.title
+        cell.configure(with: post, topicTitle: topicTitle, assetBaseURL: self.api.assetBaseURL)
         return cell
     }
 
@@ -441,7 +442,7 @@ extension SearchViewController: UITableViewDelegate {
         guard let postId = dataSource.itemIdentifier(for: indexPath),
               let post = viewModel.searchResults.first(where: { $0.id == postId })
         else { return }
-        let detailVC = TopicDetailViewController(api: api, topicId: post.topicId)
+        let detailVC = TopicDetailViewController(api: api, topicId: post.topicId, initialFloor: post.postNumber)
         navigationController?.pushViewController(detailVC, animated: true)
     }
 

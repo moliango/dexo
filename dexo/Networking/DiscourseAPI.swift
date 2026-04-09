@@ -301,8 +301,22 @@ private final class DiscourseAuthInterceptor: RequestInterceptor {
     private var csrfWaiters: [(String?) -> Void] = []
     private let csrfLock = NSLock()
 
+    private var authChangeObserver: (any NSObjectProtocol)?
+
     init(baseURL: String) {
         self.baseURL = baseURL
+        authChangeObserver = NotificationCenter.default.addObserver(forName: .discourseAuthDidChange, object: nil, queue: nil) { [weak self] notification in
+            guard let self,
+                  let changedBaseURL = notification.userInfo?["baseURL"] as? String,
+                  changedBaseURL == self.baseURL else { return }
+            self.invalidateCSRFToken()
+        }
+    }
+
+    deinit {
+        if let observer = authChangeObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
     }
 
     func adapt(_ urlRequest: URLRequest, for session: Session, completion: @escaping (Result<URLRequest, Error>) -> Void) {

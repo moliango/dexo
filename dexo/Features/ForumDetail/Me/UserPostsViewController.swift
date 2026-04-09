@@ -108,7 +108,8 @@ extension UserPostsViewController: UITableViewDataSource {
             return UITableViewCell()
         }
         let post = viewModel.searchResults[indexPath.row]
-        cell.configure(with: post, assetBaseURL: api.assetBaseURL)
+        let topicTitle = viewModel.topicsById[post.topicId]?.title
+        cell.configure(with: post, topicTitle: topicTitle, assetBaseURL: api.assetBaseURL)
         cell.accessoryType = .disclosureIndicator
         return cell
     }
@@ -120,7 +121,7 @@ extension UserPostsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let post = viewModel.searchResults[indexPath.row]
-        let detailVC = TopicDetailViewController(api: api, topicId: post.topicId)
+        let detailVC = TopicDetailViewController(api: api, topicId: post.topicId, initialFloor: post.postNumber)
         navigationController?.pushViewController(detailVC, animated: true)
     }
 
