@@ -26,7 +26,7 @@ struct NativeRenderConfig {
             baseColor: .label,
             linkColor: .link,
             codeFont: .monospacedSystemFont(ofSize: 15, weight: .regular),
-            codeBackgroundColor: .secondarySystemBackground,
+            codeBackgroundColor: ThemeManager.shared.codeBackgroundColor,
             contentWidth: contentWidth,
             baseURL: baseURL
         )

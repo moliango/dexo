@@ -5,7 +5,7 @@ final class BookmarksViewController: ObservableViewController {
     private let viewModel: BookmarksViewModel
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .plain)
+        let tv = ThemedTableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(BookmarkCell.self, forCellReuseIdentifier: BookmarkCell.reuseIdentifier)
         tv.delegate = self
@@ -52,8 +52,6 @@ final class BookmarksViewController: ObservableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "me.bookmarks")
-        view.backgroundColor = .systemBackground
-
         tableView.refreshControl = refreshControl
 
         view.addSubview(tableView)

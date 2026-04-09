@@ -30,7 +30,7 @@ final class HomeViewController: ObservableViewController {
     }()
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .plain)
+        let tv = ThemedTableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(TopicCell.self, forCellReuseIdentifier: TopicCell.reuseIdentifier)
         tv.delegate = self
@@ -130,8 +130,6 @@ final class HomeViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-
         tableView.tableFooterView = footerSpinner
         tableView.refreshControl = refreshControl
 

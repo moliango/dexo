@@ -1,6 +1,7 @@
 import UIKit
 
 final class AddForumViewController: ObservableViewController {
+    override var backgroundStyle: BackgroundStyle { .grouped }
     var onForumAdded: (() -> Void)?
 
     private let viewModel = AddForumViewModel()
@@ -46,8 +47,6 @@ final class AddForumViewController: ObservableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "add_forum.title")
-        view.backgroundColor = .systemGroupedBackground
-
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel,
             target: self,

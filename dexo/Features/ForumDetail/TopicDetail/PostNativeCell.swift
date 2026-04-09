@@ -401,8 +401,8 @@ final class PostNativeCell: UITableViewCell {
         boostButton.setImage(UIImage(systemName: boostIcon, withConfiguration: boostConfig), for: .normal)
         boostButton.setTitle(boostCount > 0 ? " \(boostCount)" : nil, for: .normal)
         boostButton.tintColor = hasMine ? .systemYellow : .tertiaryLabel
-        boostButton.isHidden = false
-        boostButton.isEnabled = true
+        boostButton.isHidden = !post.canBoost && boostCount == 0
+        boostButton.isEnabled = post.canBoost
 
         // Bookmark
         let bookmarkSymbol = post.bookmarked ? "bookmark.fill" : "bookmark"
@@ -730,19 +730,6 @@ final class PostNativeCell: UITableViewCell {
         let relative = RelativeDateTimeFormatter()
         relative.unitsStyle = .abbreviated
         return relative.localizedString(for: date, relativeTo: Date())
-    }
-}
-
-// MARK: - UIColor hex helper
-
-private extension UIColor {
-    convenience init?(hex: String) {
-        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard hex.count == 6, let int = UInt64(hex, radix: 16) else { return nil }
-        let r = CGFloat((int >> 16) & 0xFF) / 255
-        let g = CGFloat((int >> 8) & 0xFF) / 255
-        let b = CGFloat(int & 0xFF) / 255
-        self.init(red: r, green: g, blue: b, alpha: 1)
     }
 }
 

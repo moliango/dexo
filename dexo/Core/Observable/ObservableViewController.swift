@@ -1,6 +1,6 @@
 import UIKit
 
-class ObservableViewController: UIViewController {
+class ObservableViewController: BaseViewController {
     func updateUI() {
         // Subclasses override this to bind @Observable state to UI
     }

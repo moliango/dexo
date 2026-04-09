@@ -1,10 +1,13 @@
 import UIKit
 
 final class SettingsViewController: ObservableViewController {
+    override var backgroundStyle: BackgroundStyle { .grouped }
+
     private let settings = AppSettings.shared
+    private let themeManager = ThemeManager.shared
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .insetGrouped)
+        let tv = ThemedTableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.dataSource = self
         tv.delegate = self
@@ -14,8 +17,6 @@ final class SettingsViewController: ObservableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "tab.settings")
-        view.backgroundColor = .systemGroupedBackground
-
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -77,7 +78,7 @@ extension SettingsViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch visibleSections[section] {
         case .general: return 1
-        case .appearance: return 1
+        case .appearance: return 2
         case .network: return networkRows().count
         #if DEBUG
         case .debug: return 1
@@ -101,7 +102,11 @@ extension SettingsViewController: UITableViewDataSource {
         case .general:
             return makeAutoOpenCell(tableView, indexPath: indexPath)
         case .appearance:
-            return makeAppearanceCell(tableView, indexPath: indexPath)
+            if indexPath.row == 0 {
+                return makeAppearanceCell(tableView, indexPath: indexPath)
+            } else {
+                return makeThemeCell(tableView, indexPath: indexPath)
+            }
         case .network:
             let row = networkRows()[indexPath.row]
             switch row {
@@ -137,6 +142,16 @@ extension SettingsViewController: UITableViewDataSource {
         cell.textLabel?.text = String(localized: "settings.dark_mode")
         cell.detailTextLabel?.text = settings.appearanceMode.title
         cell.accessoryType = .disclosureIndicator
+
+        return cell
+    }
+
+    private func makeThemeCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        cell.textLabel?.text = String(localized: "settings.theme")
+        cell.detailTextLabel?.text = themeManager.currentTheme.name
+        cell.accessoryType = .disclosureIndicator
+
         return cell
     }
 
@@ -188,7 +203,12 @@ extension SettingsViewController: UITableViewDelegate {
         case .general:
             break
         case .appearance:
-            showAppearancePicker()
+            if indexPath.row == 0 {
+                showAppearancePicker()
+            } else {
+                let vc = ThemePickerViewController()
+                navigationController?.pushViewController(vc, animated: true)
+            }
         case .network:
             let row = networkRows()[indexPath.row]
             switch row {

@@ -6,7 +6,7 @@ final class CategoriesViewController: ObservableViewController {
     private weak var authGate: AuthGating?
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .plain)
+        let tv = ThemedTableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(CategoryCell.self, forCellReuseIdentifier: CategoryCell.reuseIdentifier)
         tv.delegate = self
@@ -71,8 +71,6 @@ final class CategoriesViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-
         tableView.refreshControl = refreshControl
 
         view.addSubview(tableView)

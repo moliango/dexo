@@ -8,7 +8,7 @@ final class MeViewController: ObservableViewController {
     private let profileHeader = ProfileHeaderView()
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .insetGrouped)
+        let tv = ThemedTableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.delegate = self
         tv.dataSource = self
@@ -42,8 +42,6 @@ final class MeViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-
         tableView.refreshControl = refreshControl
 
         view.addSubview(tableView)

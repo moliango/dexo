@@ -1,12 +1,14 @@
 import UIKit
 
 final class ForumListViewController: ObservableViewController {
+    override var backgroundStyle: BackgroundStyle { .grouped }
+
     private let viewModel = ForumListViewModel()
     private let settings = AppSettings.shared
     private var hasAttemptedAutoOpen = false
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .insetGrouped)
+        let tv = ThemedTableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(ForumListCell.self, forCellReuseIdentifier: ForumListCell.reuseIdentifier)
         tv.delegate = self
@@ -28,8 +30,6 @@ final class ForumListViewController: ObservableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "tab.forums")
-        view.backgroundColor = .systemGroupedBackground
-
         navigationItem.rightBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .add,
             target: self,

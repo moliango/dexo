@@ -9,6 +9,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let window = UIWindow(windowScene: windowScene)
         window.rootViewController = MainTabBarController()
         window.overrideUserInterfaceStyle = AppSettings.shared.appearanceMode.userInterfaceStyle
+        ThemeManager.shared.apply(to: window)
         window.makeKeyAndVisible()
         self.window = window
     }

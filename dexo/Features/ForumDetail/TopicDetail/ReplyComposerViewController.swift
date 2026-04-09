@@ -1,6 +1,6 @@
 import UIKit
 
-final class ReplyComposerViewController: UIViewController {
+final class ReplyComposerViewController: BaseViewController {
     private let api: DiscourseAPI
     private let topicId: Int
     private let replyToPost: DiscourseTopicDetail.Post?
@@ -89,7 +89,7 @@ final class ReplyComposerViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
+
 
         if let username = replyToPost?.username {
             title = String(localized: "reply.title.to \(username)")

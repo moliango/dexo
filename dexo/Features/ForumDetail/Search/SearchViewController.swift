@@ -64,7 +64,7 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
     // MARK: - Table
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .plain)
+        let tv = ThemedTableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(SearchResultCell.self, forCellReuseIdentifier: SearchResultCell.reuseIdentifier)
         tv.delegate = self
@@ -115,7 +115,6 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "search.title")
-        view.backgroundColor = .systemBackground
         definesPresentationContext = true
 
         searchController.searchBar.delegate = self

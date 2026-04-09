@@ -13,5 +13,18 @@ final class MainTabBarController: UITabBarController {
         settingsNav.tabBarItem = UITabBarItem(title: String(localized: "tab.settings"), image: UIImage(systemName: "gearshape"), tag: 1)
 
         viewControllers = [forumListNav, settingsNav]
+
+        tabBar.tintColor = ThemeManager.shared.accentColor
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(themeDidChange),
+            name: ThemeManager.themeDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func themeDidChange() {
+        tabBar.tintColor = ThemeManager.shared.accentColor
     }
 }

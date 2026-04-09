@@ -14,7 +14,7 @@ enum BlockquoteRenderer: BlockRenderer {
         container.translatesAutoresizingMaskIntoConstraints = false
 
         let bar = UIView()
-        bar.backgroundColor = .separator
+        bar.backgroundColor = ThemeManager.shared.quoteBarColor
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.layer.cornerRadius = 1.5
         container.addSubview(bar)

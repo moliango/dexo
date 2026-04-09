@@ -1,7 +1,7 @@
 import AuthenticationServices
 import UIKit
 
-final class ForumContainerViewController: UIViewController, AuthGating {
+final class ForumContainerViewController: BaseViewController, AuthGating {
     private(set) var forum: ForumInstance
     private let api: DiscourseAPI
     private let authManager = AuthManager.shared
@@ -19,7 +19,6 @@ final class ForumContainerViewController: UIViewController, AuthGating {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
 
         authManager.restoreAuthState(for: forum)
 
@@ -56,8 +55,21 @@ final class ForumContainerViewController: UIViewController, AuthGating {
         appearance.configureWithDefaultBackground() // 磨砂
         tabBarVC.tabBar.standardAppearance = appearance
         tabBarVC.tabBar.scrollEdgeAppearance = appearance // 强制覆盖，不让系统自动切换
+        tabBarVC.tabBar.tintColor = ThemeManager.shared.accentColor
 
         tabBarVC.didMove(toParent: self)
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(updateTabBarTheme),
+            name: ThemeManager.themeDidChangeNotification,
+            object: nil
+        )
+    }
+
+    @objc private func updateTabBarTheme() {
+        guard let tabBarVC = children.first as? ForumTabBarController else { return }
+        tabBarVC.tabBar.tintColor = ThemeManager.shared.accentColor
     }
 
     private func configureNavItems() {

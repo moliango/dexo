@@ -74,6 +74,43 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "hasShownAutoOpenPrompt") }
     }
 
+    // MARK: - Theme
+
+    var selectedThemeId: String {
+        get { defaults.string(forKey: "selectedThemeId") ?? "default" }
+        set { defaults.set(newValue, forKey: "selectedThemeId") }
+    }
+
+    var customLightAccentHex: String {
+        get { defaults.string(forKey: "customLightAccentHex") ?? "007AFF" }
+        set { defaults.set(newValue, forKey: "customLightAccentHex") }
+    }
+
+    var customDarkAccentHex: String {
+        get { defaults.string(forKey: "customDarkAccentHex") ?? "0A84FF" }
+        set { defaults.set(newValue, forKey: "customDarkAccentHex") }
+    }
+
+    var customLightBackgroundHex: String {
+        get { defaults.string(forKey: "customLightBackgroundHex") ?? "F2F2F7" }
+        set { defaults.set(newValue, forKey: "customLightBackgroundHex") }
+    }
+
+    var customDarkBackgroundHex: String {
+        get { defaults.string(forKey: "customDarkBackgroundHex") ?? "000000" }
+        set { defaults.set(newValue, forKey: "customDarkBackgroundHex") }
+    }
+
+    var customLightCardBackgroundHex: String {
+        get { defaults.string(forKey: "customLightCardBackgroundHex") ?? "FFFFFF" }
+        set { defaults.set(newValue, forKey: "customLightCardBackgroundHex") }
+    }
+
+    var customDarkCardBackgroundHex: String {
+        get { defaults.string(forKey: "customDarkCardBackgroundHex") ?? "1C1C1E" }
+        set { defaults.set(newValue, forKey: "customDarkCardBackgroundHex") }
+    }
+
     // MARK: - DNS over HTTPS
 
     enum DoHProvider: Int, CaseIterable {

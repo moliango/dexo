@@ -7,7 +7,7 @@ final class UserProfileViewController: ObservableViewController {
     private let profileHeader = ProfileHeaderView()
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .insetGrouped)
+        let tv = ThemedTableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.delegate = self
         tv.dataSource = self
@@ -36,8 +36,6 @@ final class UserProfileViewController: ObservableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = viewModel.username
-        view.backgroundColor = .systemBackground
-
         view.addSubview(tableView)
         view.addSubview(activityIndicator)
 

@@ -35,8 +35,6 @@ final class MessagesViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-
         view.addSubview(placeholderLabel)
         view.addSubview(loginButton)
         NSLayoutConstraint.activate([

@@ -7,7 +7,7 @@ private nonisolated enum ReplyItem: Hashable, Sendable {
     case boosts(Int)
 }
 
-final class RepliesViewController: UIViewController {
+final class RepliesViewController: BaseViewController {
     private let api: DiscourseAPI
     private let postId: Int
     private let topicId: Int
@@ -20,7 +20,7 @@ final class RepliesViewController: UIViewController {
     private var expandedBoostPostIds: Set<Int> = []
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .plain)
+        let tv = ThemedTableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(PostNativeCell.self, forCellReuseIdentifier: PostNativeCell.reuseIdentifier)
         tv.register(BoostCell.self, forCellReuseIdentifier: BoostCell.reuseIdentifier)
@@ -102,7 +102,7 @@ final class RepliesViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Replies"
-        view.backgroundColor = .systemBackground
+
 
         view.addSubview(tableView)
         view.addSubview(activityIndicator)

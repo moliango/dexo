@@ -1,6 +1,8 @@
 import UIKit
 
-final class TagPickerViewController: UIViewController, UISearchBarDelegate {
+final class TagPickerViewController: BaseViewController, UISearchBarDelegate {
+    override var backgroundStyle: BackgroundStyle { .grouped }
+
     private let api: DiscourseAPI
     private let categoryId: Int?
     private let currentTag: String?
@@ -21,7 +23,7 @@ final class TagPickerViewController: UIViewController, UISearchBarDelegate {
     }()
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .insetGrouped)
+        let tv = ThemedTableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.delegate = self
         return tv
@@ -90,7 +92,6 @@ final class TagPickerViewController: UIViewController, UISearchBarDelegate {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "search.tag_picker.title")
-        view.backgroundColor = .systemGroupedBackground
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel,

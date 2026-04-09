@@ -5,7 +5,7 @@ final class UserPostsViewController: ObservableViewController {
     private let viewModel: UserPostsViewModel
 
     private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .plain)
+        let tv = ThemedTableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(SearchResultCell.self, forCellReuseIdentifier: SearchResultCell.reuseIdentifier)
         tv.delegate = self
@@ -53,8 +53,6 @@ final class UserPostsViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemBackground
-
         view.addSubview(tableView)
         view.addSubview(activityIndicator)
         view.addSubview(emptyLabel)

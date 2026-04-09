@@ -15,7 +15,7 @@ enum DiscourseQuoteRenderer: BlockRenderer {
 
         let container = UIView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.backgroundColor = .secondarySystemBackground
+        container.backgroundColor = ThemeManager.shared.codeBackgroundColor
 
         // Header: avatar + (username OR topic title + category badge)
         let headerStack = UIStackView()
@@ -83,7 +83,7 @@ enum DiscourseQuoteRenderer: BlockRenderer {
 
         // Vertical bar + content
         let bar = UIView()
-        bar.backgroundColor = .separator
+        bar.backgroundColor = ThemeManager.shared.quoteBarColor
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.layer.cornerRadius = 1.5
         container.addSubview(bar)

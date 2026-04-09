@@ -3,7 +3,7 @@ import WebKit
 
 /// Presents a WKWebView so users can log in to a Discourse forum via their browser.
 /// Fires onSuccess once the Discourse session cookie `_t` is detected.
-final class WebLoginViewController: UIViewController {
+final class WebLoginViewController: BaseViewController {
     private let targetURL: URL
     private let onSuccess: ([HTTPCookie], String?) -> Void
 
@@ -43,7 +43,7 @@ final class WebLoginViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "weblogin.title")
-        view.backgroundColor = .systemBackground
+
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)
         )
