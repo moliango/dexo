@@ -87,6 +87,51 @@ final class DiscourseAPI {
         return response.currentUser
     }
 
+    func createTopic(title: String, categoryId: Int, raw: String, tags: [String] = []) async throws -> DiscourseCreatePostResponse {
+        var params: [String: Any] = [
+            "title": title,
+            "category": categoryId,
+            "raw": raw,
+        ]
+        if !tags.isEmpty {
+            params["tags"] = tags
+        }
+        return try await request(route: .createTopic, parameters: params)
+    }
+
+    func uploadImage(data: Data, filename: String) async throws -> DiscourseUploadResponse {
+        let url = baseURL + DiscourseRouter.uploadImage.path
+        let response = await session.upload(
+            multipartFormData: { formData in
+                formData.append(Data("composer".utf8), withName: "type")
+                formData.append(data, withName: "file", fileName: filename, mimeType: "image/jpeg")
+            },
+            to: url,
+            method: .post
+        ).serializingDecodable(DiscourseUploadResponse.self).response
+
+        #if DEBUG
+        if let data = response.data, let body = String(data: data, encoding: .utf8) {
+            print("[DiscourseAPI] POST \(url)\n\(body)")
+        }
+        #endif
+
+        if let newToken = response.response?.value(forHTTPHeaderField: "X-CSRF-Token") {
+            interceptor.updateCSRFToken(newToken)
+        }
+
+        if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
+            if let data = response.data,
+               let errBody = try? JSONDecoder().decode(UploadErrorResponse.self, from: data),
+               !errBody.errors.isEmpty
+            {
+                throw DiscourseAPIError(messages: errBody.errors, errorType: nil)
+            }
+            throw DiscourseAPIError(messages: ["Image upload failed"], errorType: nil)
+        }
+        return try response.result.get()
+    }
+
     func createReply(topicId: Int, replyToPostNumber: Int?, raw: String) async throws -> DiscourseCreatePostResponse {
         var params: [String: Any] = [
             "topic_id": topicId,
@@ -268,6 +313,10 @@ private struct DiscourseErrorResponse: Decodable {
         case errors
         case errorType = "error_type"
     }
+}
+
+private struct UploadErrorResponse: Decodable {
+    let errors: [String]
 }
 
 private struct DiscourseFailedResponse: Decodable {

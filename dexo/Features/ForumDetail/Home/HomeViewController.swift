@@ -97,6 +97,30 @@ final class HomeViewController: ObservableViewController {
         return button
     }()
 
+    private let composeButtonSize: CGFloat = 56
+    private let composeButtonEdgeMargin: CGFloat = 20
+    private var composeDragDistance: CGFloat = 0
+
+    private lazy var composeButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .semibold)
+        button.setImage(UIImage(systemName: "plus", withConfiguration: config), for: .normal)
+        button.backgroundColor = ThemeManager.shared.accentColor
+        button.tintColor = .white
+        button.layer.cornerRadius = 28
+        button.layer.shadowColor = UIColor.black.cgColor
+        button.layer.shadowOpacity = 0.25
+        button.layer.shadowOffset = CGSize(width: 0, height: 2)
+        button.layer.shadowRadius = 4
+        button.addTarget(self, action: #selector(composeButtonTouchDown), for: .touchDown)
+        button.addTarget(self, action: #selector(composeTapped), for: .touchUpInside)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(handleComposePan(_:)))
+        button.addGestureRecognizer(pan)
+
+        return button
+    }()
+
     private lazy var refreshControl: UIRefreshControl = {
         let rc = UIRefreshControl()
         rc.addTarget(self, action: #selector(pullToRefresh), for: .valueChanged)
@@ -115,6 +139,8 @@ final class HomeViewController: ObservableViewController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    private var hasPlacedComposeButton = false
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
@@ -126,6 +152,15 @@ final class HomeViewController: ObservableViewController {
             tableView.contentInset.top = extraInset
         }
         tableView.verticalScrollIndicatorInsets.top = extraInset
+
+        if !hasPlacedComposeButton {
+            hasPlacedComposeButton = true
+            let safe = view.safeAreaLayoutGuide.layoutFrame
+            composeButton.center = CGPoint(
+                x: safe.maxX - composeButtonEdgeMargin - composeButtonSize / 2,
+                y: safe.maxY - composeButtonEdgeMargin - composeButtonSize / 2
+            )
+        }
     }
 
     override func viewDidLoad() {
@@ -200,6 +235,9 @@ final class HomeViewController: ObservableViewController {
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(customView: categoryButton)
 
+        view.addSubview(composeButton)
+        composeButton.frame = CGRect(x: 0, y: 0, width: composeButtonSize, height: composeButtonSize)
+
         Task {
             await viewModel.loadTopics()
         }
@@ -223,7 +261,9 @@ final class HomeViewController: ObservableViewController {
         loginButton.isHidden = true
         tableView.isHidden = false
         segmentedControl.isHidden = false
-
+        segmentedControl.selectedSegmentTintColor = ThemeManager.shared.cardBackgroundColor
+        segmentedControl.backgroundColor = ThemeManager.shared.backgroundColor.withAlphaComponent(0.2)
+        composeButton.backgroundColor = ThemeManager.shared.accentColor
         categoryButton.menu = UIMenu(title: "", children: buildCategoryMenuElements())
         updateCategoryButton()
         // Show non-login errors (e.g. rate limit) when topic list is empty
@@ -273,6 +313,83 @@ final class HomeViewController: ObservableViewController {
             await viewModel.loadTopics()
             refreshControl.endRefreshing()
         }
+    }
+
+    @objc private func handleComposePan(_ gesture: UIPanGestureRecognizer) {
+        let translation = gesture.translation(in: view)
+        switch gesture.state {
+        case .began:
+            composeDragDistance = 0
+        case .changed:
+            composeButton.center = CGPoint(
+                x: composeButton.center.x + translation.x,
+                y: composeButton.center.y + translation.y
+            )
+            composeDragDistance += abs(translation.x) + abs(translation.y)
+            gesture.setTranslation(.zero, in: view)
+        case .ended, .cancelled:
+            snapComposeButtonToEdge(velocity: gesture.velocity(in: view))
+        default:
+            break
+        }
+    }
+
+    private func snapComposeButtonToEdge(velocity: CGPoint) {
+        let safe = view.safeAreaLayoutGuide.layoutFrame
+        let margin = composeButtonEdgeMargin
+        let half = composeButtonSize / 2
+        let center = composeButton.center
+
+        // Determine left or right based on position + velocity bias
+        let goRight: Bool
+        if abs(velocity.x) > 200 {
+            goRight = velocity.x > 0
+        } else {
+            goRight = center.x > view.bounds.midX
+        }
+
+        let targetX = goRight
+            ? safe.maxX - margin - half
+            : safe.minX + margin + half
+
+        // Clamp Y within safe area
+        let targetY = min(max(center.y, safe.minY + half + margin), safe.maxY - half - margin)
+
+        UIView.animate(
+            withDuration: 0.35,
+            delay: 0,
+            usingSpringWithDamping: 0.7,
+            initialSpringVelocity: 0.5,
+            options: .curveEaseOut
+        ) {
+            self.composeButton.center = CGPoint(x: targetX, y: targetY)
+        }
+    }
+
+    @objc private func composeButtonTouchDown() {
+        composeDragDistance = 0
+    }
+
+    @objc private func composeTapped() {
+        guard composeDragDistance < 10 else { return }
+        authGate?.requireAuth { [weak self] in
+            self?.presentTopicComposer()
+        }
+    }
+
+    private func presentTopicComposer() {
+        let composer = TopicComposerViewController(api: api)
+        composer.onTopicCreated = { [weak self] _ in
+            Task {
+                await self?.viewModel.loadTopics()
+            }
+        }
+        let nav = UINavigationController(rootViewController: composer)
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(nav, animated: true)
     }
 
     @objc private func loginTapped() {

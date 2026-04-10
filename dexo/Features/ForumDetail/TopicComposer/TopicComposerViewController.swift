@@ -1,0 +1,742 @@
+import PhotosUI
+import UIKit
+
+final class TopicComposerViewController: ObservableViewController {
+    private let api: DiscourseAPI
+    private let viewModel: TopicComposerViewModel
+    var onTopicCreated: ((Int) -> Void)?
+
+    private var isEmojiPickerVisible = false
+    private var hasLoadedCustomEmojis = false
+
+    // MARK: - UI Elements
+
+    private let titleField: UITextField = {
+        let tf = UITextField()
+        tf.placeholder = String(localized: "compose.title.placeholder")
+        tf.font = .systemFont(ofSize: 17, weight: .semibold)
+        tf.borderStyle = .none
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        tf.returnKeyType = .next
+        return tf
+    }()
+
+    private let categoryButton: UIButton = {
+        var config = UIButton.Configuration.plain()
+        config.title = String(localized: "compose.category.select")
+        config.image = UIImage(systemName: "folder", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13))
+        config.imagePlacement = .leading
+        config.imagePadding = 6
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
+            var a = attrs
+            a.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+            return a
+        }
+        config.baseForegroundColor = .secondaryLabel
+        let button = UIButton(configuration: config)
+        button.showsMenuAsPrimaryAction = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.contentHorizontalAlignment = .leading
+        return button
+    }()
+
+    private let tagField: UITextField = {
+        let tf = UITextField()
+        tf.placeholder = String(localized: "compose.tags.placeholder")
+        tf.font = .systemFont(ofSize: 15)
+        tf.borderStyle = .none
+        tf.translatesAutoresizingMaskIntoConstraints = false
+        tf.returnKeyType = .done
+        tf.autocapitalizationType = .none
+        tf.autocorrectionType = .no
+        return tf
+    }()
+
+    private let tagIcon: UIImageView = {
+        let iv = UIImageView(image: UIImage(systemName: "tag", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13)))
+        iv.tintColor = .secondaryLabel
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        iv.setContentHuggingPriority(.required, for: .horizontal)
+        return iv
+    }()
+
+    private let tagChipsContainer: UIStackView = {
+        let sv = UIStackView()
+        sv.axis = .horizontal
+        sv.spacing = 6
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
+    }()
+
+    private lazy var tagSuggestionsTable: UITableView = {
+        let tv = UITableView(frame: .zero, style: .plain)
+        tv.translatesAutoresizingMaskIntoConstraints = false
+        tv.isHidden = true
+        tv.register(UITableViewCell.self, forCellReuseIdentifier: "TagCell")
+        tv.delegate = self
+        tv.dataSource = self
+        tv.rowHeight = 40
+        tv.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
+        tv.layer.borderColor = UIColor.separator.cgColor
+        tv.layer.borderWidth = 0.5
+        return tv
+    }()
+
+    private var tagSearchDebounceTask: Task<Void, Never>?
+    private var tagSuggestionsTopConstraint: NSLayoutConstraint?
+
+    private let bodyTextView: UITextView = {
+        let tv = UITextView()
+        tv.font = .systemFont(ofSize: 16)
+        tv.translatesAutoresizingMaskIntoConstraints = false
+        tv.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
+        return tv
+    }()
+
+    private let bodyPlaceholder: UILabel = {
+        let label = UILabel()
+        label.text = String(localized: "compose.body.placeholder")
+        label.font = .systemFont(ofSize: 16)
+        label.textColor = .placeholderText
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+
+    private lazy var markdownToolbar: MarkdownToolbarView = {
+        let toolbar = MarkdownToolbarView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 44))
+        toolbar.onAction = { [weak self] action in
+            self?.handleToolbarAction(action)
+        }
+        return toolbar
+    }()
+
+    private lazy var emojiPickerInputView: EmojiPickerView = {
+        let picker = EmojiPickerView(frame: CGRect(x: 0, y: 0, width: view.bounds.width, height: 260))
+        picker.autoresizingMask = .flexibleWidth
+        picker.onEmojiSelected = { [weak self] emoji in
+            self?.insertText(emoji)
+        }
+        return picker
+    }()
+
+    private lazy var sendButton: UIBarButtonItem = {
+        UIBarButtonItem(title: String(localized: "compose.send"), style: .done, target: self, action: #selector(sendTapped))
+    }()
+
+    private func makeSeparator() -> UIView {
+        let v = UIView()
+        v.backgroundColor = .separator
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.heightAnchor.constraint(equalToConstant: 0.5).isActive = true
+        return v
+    }
+
+    // MARK: - Init
+
+    init(api: DiscourseAPI) {
+        self.api = api
+        self.viewModel = TopicComposerViewModel(api: api)
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // MARK: - Lifecycle
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        title = String(localized: "compose.title")
+        navigationItem.leftBarButtonItem = UIBarButtonItem(
+            title: String(localized: "action.cancel"), style: .plain,
+            target: self, action: #selector(cancelTapped)
+        )
+        navigationItem.rightBarButtonItem = sendButton
+
+        setupLayout()
+
+        titleField.delegate = self
+        tagField.delegate = self
+        bodyTextView.delegate = self
+        bodyTextView.inputAccessoryView = markdownToolbar
+
+        titleField.addTarget(self, action: #selector(titleChanged), for: .editingChanged)
+        tagField.addTarget(self, action: #selector(tagFieldChanged), for: .editingChanged)
+
+        Task {
+            await viewModel.loadCategories()
+        }
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        titleField.becomeFirstResponder()
+    }
+
+    // MARK: - Layout
+
+    private func setupLayout() {
+        let sep1 = makeSeparator()
+        let sep2 = makeSeparator()
+        let sep3 = makeSeparator()
+
+        let tagRow = makeTagRow()
+
+        let headerStack = UIStackView(arrangedSubviews: [
+            titleField, sep1,
+            categoryButton, sep2,
+            tagRow, sep3,
+        ])
+        headerStack.axis = .vertical
+        headerStack.spacing = 0
+        headerStack.translatesAutoresizingMaskIntoConstraints = false
+
+        view.addSubview(headerStack)
+        view.addSubview(bodyTextView)
+        view.addSubview(bodyPlaceholder)
+        view.addSubview(tagSuggestionsTable)
+
+        let titleHeight: CGFloat = 48
+        let rowHeight: CGFloat = 44
+
+        let suggestionsTop = tagSuggestionsTable.topAnchor.constraint(equalTo: tagRow.bottomAnchor)
+        tagSuggestionsTopConstraint = suggestionsTop
+
+        NSLayoutConstraint.activate([
+            headerStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            headerStack.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            headerStack.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+
+            titleField.heightAnchor.constraint(equalToConstant: titleHeight),
+            titleField.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor, constant: 16),
+            titleField.trailingAnchor.constraint(equalTo: headerStack.trailingAnchor, constant: -16),
+
+            categoryButton.heightAnchor.constraint(equalToConstant: rowHeight),
+
+            bodyTextView.topAnchor.constraint(equalTo: headerStack.bottomAnchor),
+            bodyTextView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bodyTextView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            bodyTextView.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+
+            bodyPlaceholder.topAnchor.constraint(equalTo: bodyTextView.topAnchor, constant: 12),
+            bodyPlaceholder.leadingAnchor.constraint(equalTo: bodyTextView.leadingAnchor, constant: 13),
+
+            suggestionsTop,
+            tagSuggestionsTable.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tagSuggestionsTable.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tagSuggestionsTable.heightAnchor.constraint(lessThanOrEqualToConstant: 160),
+        ])
+    }
+
+    private func makeTagRow() -> UIView {
+        let row = UIView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+
+        let scrollView = UIScrollView()
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(tagChipsContainer)
+
+        row.addSubview(tagIcon)
+        row.addSubview(scrollView)
+        row.addSubview(tagField)
+
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: 44),
+            tagIcon.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 16),
+            tagIcon.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+
+            scrollView.leadingAnchor.constraint(equalTo: tagIcon.trailingAnchor, constant: 8),
+            scrollView.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            scrollView.heightAnchor.constraint(equalToConstant: 28),
+
+            tagChipsContainer.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            tagChipsContainer.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            tagChipsContainer.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            tagChipsContainer.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            tagChipsContainer.heightAnchor.constraint(equalTo: scrollView.heightAnchor),
+
+            tagField.leadingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: 4),
+            tagField.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -16),
+            tagField.centerYAnchor.constraint(equalTo: row.centerYAnchor),
+            tagField.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+        ])
+
+        // Let chips scroll shrink when no chips
+        scrollView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        scrollView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tagField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tagField.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        return row
+    }
+
+    // MARK: - updateUI (ObservableViewController)
+
+    override func updateUI() {
+        sendButton.isEnabled = viewModel.canSubmit
+        categoryButton.menu = UIMenu(title: "", children: buildCategoryMenuElements())
+        updateCategoryButton()
+        bodyPlaceholder.isHidden = !bodyTextView.text.isEmpty
+        updateTagSuggestions()
+        rebuildTagChips()
+    }
+
+    // MARK: - Category Menu
+
+    private func buildCategoryMenuElements() -> [UIMenuElement] {
+        var elements: [UIMenuElement] = []
+        for cat in viewModel.categories {
+            let state: UIMenuElement.State = viewModel.selectedCategory?.id == cat.id ? .on : .off
+            let catColor = Self.color(fromHex: cat.color)
+            let catImage = Self.colorDotImage(color: catColor)
+            let catAction = UIAction(title: cat.name, image: catImage, state: state) { [weak self] _ in
+                self?.viewModel.selectedCategory = cat
+            }
+            if let subs = cat.subcategoryList, !subs.isEmpty {
+                var groupChildren: [UIMenuElement] = [catAction]
+                for sub in subs {
+                    let subState: UIMenuElement.State = viewModel.selectedCategory?.id == sub.id ? .on : .off
+                    let subColor = Self.color(fromHex: sub.color)
+                    let subImage = Self.colorDotImage(color: subColor)
+                    let subAction = UIAction(title: sub.name, image: subImage, state: subState) { [weak self] _ in
+                        self?.viewModel.selectedCategory = sub
+                    }
+                    groupChildren.append(subAction)
+                }
+                elements.append(UIMenu(title: cat.name, image: catImage, children: groupChildren))
+            } else {
+                elements.append(catAction)
+            }
+        }
+        return elements
+    }
+
+    private func updateCategoryButton() {
+        var config = categoryButton.configuration ?? UIButton.Configuration.plain()
+        if let cat = viewModel.selectedCategory {
+            config.title = cat.name
+            if let color = Self.color(fromHex: cat.color) {
+                config.image = UIImage(systemName: "circle.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 10))
+                config.baseForegroundColor = color
+            }
+        } else {
+            config.title = String(localized: "compose.category.select")
+            config.image = UIImage(systemName: "folder", withConfiguration: UIImage.SymbolConfiguration(pointSize: 13))
+            config.baseForegroundColor = .secondaryLabel
+        }
+        categoryButton.configuration = config
+    }
+
+    // MARK: - Actions
+
+    @objc private func cancelTapped() {
+        if viewModel.hasUnsavedChanges {
+            let alert = UIAlertController(
+                title: String(localized: "compose.discard.title"),
+                message: String(localized: "compose.discard.message"),
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: String(localized: "compose.discard.action"), style: .destructive) { [weak self] _ in
+                self?.dismiss(animated: true)
+            })
+            alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
+            present(alert, animated: true)
+        } else {
+            dismiss(animated: true)
+        }
+    }
+
+    @objc private func sendTapped() {
+        sendButton.isEnabled = false
+        bodyTextView.isEditable = false
+        titleField.isEnabled = false
+
+        Task {
+            do {
+                let topicId = try await viewModel.submit()
+                dismiss(animated: true) { [weak self] in
+                    self?.onTopicCreated?(topicId)
+                }
+            } catch {
+                sendButton.isEnabled = true
+                bodyTextView.isEditable = true
+                titleField.isEnabled = true
+                let alert = UIAlertController(
+                    title: String(localized: "compose.send.failed"),
+                    message: error.localizedDescription,
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+        }
+    }
+
+    @objc private func titleChanged() {
+        viewModel.title = titleField.text ?? ""
+    }
+
+    @objc private func tagFieldChanged() {
+        let query = tagField.text ?? ""
+        tagSearchDebounceTask?.cancel()
+        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            viewModel.tagSuggestions = []
+            return
+        }
+        tagSearchDebounceTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await viewModel.searchTags(query: query)
+        }
+    }
+
+    // MARK: - Tag Chips & Suggestions
+
+    private func rebuildTagChips() {
+        tagChipsContainer.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        for tag in viewModel.selectedTags {
+            let chip = makeTagChip(tag)
+            tagChipsContainer.addArrangedSubview(chip)
+        }
+    }
+
+    private func makeTagChip(_ tag: String) -> UIView {
+        let container = UIView()
+        container.backgroundColor = ThemeManager.shared.accentColor.withAlphaComponent(0.15)
+        container.layer.cornerRadius = 12
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let label = UILabel()
+        label.text = tag
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.textColor = ThemeManager.shared.accentColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let removeButton = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 10, weight: .bold)
+        removeButton.setImage(UIImage(systemName: "xmark", withConfiguration: config), for: .normal)
+        removeButton.tintColor = ThemeManager.shared.accentColor
+        removeButton.translatesAutoresizingMaskIntoConstraints = false
+        removeButton.addAction(UIAction { [weak self] _ in
+            self?.removeTag(tag)
+        }, for: .touchUpInside)
+
+        container.addSubview(label)
+        container.addSubview(removeButton)
+
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 10),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            removeButton.leadingAnchor.constraint(equalTo: label.trailingAnchor, constant: 4),
+            removeButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6),
+            removeButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            removeButton.widthAnchor.constraint(equalToConstant: 18),
+            removeButton.heightAnchor.constraint(equalToConstant: 18),
+            container.heightAnchor.constraint(equalToConstant: 26),
+        ])
+
+        return container
+    }
+
+    private func removeTag(_ tag: String) {
+        viewModel.selectedTags.removeAll { $0 == tag }
+    }
+
+    private func selectTag(_ tag: String) {
+        guard !viewModel.selectedTags.contains(tag) else { return }
+        viewModel.selectedTags.append(tag)
+        tagField.text = ""
+        viewModel.tagSuggestions = []
+    }
+
+    private func updateTagSuggestions() {
+        let hasSuggestions = !viewModel.tagSuggestions.isEmpty
+        tagSuggestionsTable.isHidden = !hasSuggestions
+        if hasSuggestions {
+            tagSuggestionsTable.reloadData()
+            view.bringSubviewToFront(tagSuggestionsTable)
+        }
+    }
+
+    // MARK: - Markdown Toolbar
+
+    private func handleToolbarAction(_ action: MarkdownAction) {
+        switch action {
+        case .bold:
+            wrapSelection(prefix: "**", suffix: "**")
+        case .italic:
+            wrapSelection(prefix: "_", suffix: "_")
+        case .heading:
+            prependToCurrentLine("## ")
+        case .link:
+            insertLinkTemplate()
+        case .bulletList:
+            prependToCurrentLine("- ")
+        case .quote:
+            prependToCurrentLine("> ")
+        case .code:
+            insertCode()
+        case .pickImage:
+            presentImagePicker()
+        case .toggleEmoji:
+            toggleEmojiPicker()
+        }
+    }
+
+    private func wrapSelection(prefix: String, suffix: String) {
+        guard let range = bodyTextView.selectedTextRange else { return }
+        let selected = bodyTextView.text(in: range) ?? ""
+        let replacement = prefix + selected + suffix
+        bodyTextView.replace(range, withText: replacement)
+
+        // Place cursor between prefix/suffix if no selection
+        if selected.isEmpty {
+            if let newPos = bodyTextView.position(from: range.start, offset: prefix.count) {
+                bodyTextView.selectedTextRange = bodyTextView.textRange(from: newPos, to: newPos)
+            }
+        }
+        textViewDidChange(bodyTextView)
+    }
+
+    private func prependToCurrentLine(_ prefix: String) {
+        let text = bodyTextView.text ?? ""
+        let nsRange = bodyTextView.selectedRange
+        let nsText = text as NSString
+
+        // Find the start of the current line
+        let lineRange = nsText.lineRange(for: NSRange(location: nsRange.location, length: 0))
+        let lineStart = lineRange.location
+
+        // Insert prefix at line start
+        let mutable = NSMutableString(string: text)
+        mutable.insert(prefix, at: lineStart)
+        bodyTextView.text = mutable as String
+        bodyTextView.selectedRange = NSRange(location: nsRange.location + prefix.count, length: 0)
+        textViewDidChange(bodyTextView)
+    }
+
+    private func insertLinkTemplate() {
+        guard let range = bodyTextView.selectedTextRange else { return }
+        let selected = bodyTextView.text(in: range) ?? ""
+        if selected.isEmpty {
+            bodyTextView.replace(range, withText: "[](url)")
+            if let newPos = bodyTextView.position(from: range.start, offset: 1) {
+                bodyTextView.selectedTextRange = bodyTextView.textRange(from: newPos, to: newPos)
+            }
+        } else {
+            let replacement = "[\(selected)](url)"
+            bodyTextView.replace(range, withText: replacement)
+            // Select "url" for easy replacement
+            if let urlStart = bodyTextView.position(from: range.start, offset: selected.count + 3),
+               let urlEnd = bodyTextView.position(from: urlStart, offset: 3)
+            {
+                bodyTextView.selectedTextRange = bodyTextView.textRange(from: urlStart, to: urlEnd)
+            }
+        }
+        textViewDidChange(bodyTextView)
+    }
+
+    private func insertCode() {
+        guard let range = bodyTextView.selectedTextRange else { return }
+        let selected = bodyTextView.text(in: range) ?? ""
+        if selected.contains("\n") {
+            let replacement = "```\n\(selected)\n```"
+            bodyTextView.replace(range, withText: replacement)
+        } else {
+            wrapSelection(prefix: "`", suffix: "`")
+        }
+    }
+
+    private func insertText(_ text: String) {
+        guard let range = bodyTextView.selectedTextRange else {
+            bodyTextView.text.append(text)
+            textViewDidChange(bodyTextView)
+            return
+        }
+        bodyTextView.replace(range, withText: text)
+        textViewDidChange(bodyTextView)
+    }
+
+    // MARK: - Emoji Picker
+
+    private func toggleEmojiPicker() {
+        isEmojiPickerVisible.toggle()
+        if isEmojiPickerVisible {
+            bodyTextView.inputView = emojiPickerInputView
+            loadCustomEmojis()
+        } else {
+            bodyTextView.inputView = nil
+        }
+        markdownToolbar.updateEmojiButtonIcon(isEmojiVisible: isEmojiPickerVisible)
+        bodyTextView.reloadInputViews()
+        if !bodyTextView.isFirstResponder {
+            bodyTextView.becomeFirstResponder()
+        }
+    }
+
+    private func loadCustomEmojis() {
+        guard !hasLoadedCustomEmojis else { return }
+        hasLoadedCustomEmojis = true
+        emojiPickerInputView.showLoading()
+        Task {
+            do {
+                let emojis = try await api.fetchCustomEmojis()
+                emojiPickerInputView.setCustomEmojis(emojis)
+            } catch {
+                // Silent — Unicode emojis still work
+            }
+        }
+    }
+
+    // MARK: - Image Upload
+
+    private func presentImagePicker() {
+        var config = PHPickerConfiguration()
+        config.filter = .images
+        config.selectionLimit = 1
+        let picker = PHPickerViewController(configuration: config)
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    private func uploadImage(_ image: UIImage) {
+        guard let data = image.jpegData(compressionQuality: 0.8) else { return }
+        let filename = "image_\(Int(Date().timeIntervalSince1970)).jpg"
+
+        // Insert placeholder
+        let placeholder = "[" + String(localized: "compose.uploading") + "]"
+        let insertRange = bodyTextView.selectedTextRange ?? bodyTextView.textRange(
+            from: bodyTextView.endOfDocument, to: bodyTextView.endOfDocument
+        )!
+        bodyTextView.replace(insertRange, withText: placeholder)
+        textViewDidChange(bodyTextView)
+
+        Task {
+            do {
+                let response = try await viewModel.uploadImage(data: data, filename: filename)
+                let markdown = "![\(response.originalFilename)](\(response.shortUrl))"
+                if let range = (bodyTextView.text as NSString?)?.range(of: placeholder),
+                   range.location != NSNotFound
+                {
+                    let mutable = NSMutableString(string: bodyTextView.text)
+                    mutable.replaceCharacters(in: range, with: markdown)
+                    bodyTextView.text = mutable as String
+                }
+                viewModel.body = bodyTextView.text
+                textViewDidChange(bodyTextView)
+            } catch {
+                // Remove placeholder on failure
+                if let range = (bodyTextView.text as NSString?)?.range(of: placeholder),
+                   range.location != NSNotFound
+                {
+                    let mutable = NSMutableString(string: bodyTextView.text)
+                    mutable.deleteCharacters(in: range)
+                    bodyTextView.text = mutable as String
+                }
+                textViewDidChange(bodyTextView)
+                let alert = UIAlertController(
+                    title: String(localized: "compose.upload.failed"),
+                    message: error.localizedDescription,
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "OK", style: .default))
+                present(alert, animated: true)
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    private static func color(fromHex hex: String) -> UIColor? {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard cleaned.count == 6, let rgb = UInt64(cleaned, radix: 16) else { return nil }
+        return UIColor(
+            red: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1
+        )
+    }
+
+    private static func colorDotImage(color: UIColor?) -> UIImage? {
+        guard let color else { return nil }
+        let size = CGSize(width: 12, height: 12)
+        return UIGraphicsImageRenderer(size: size).image { ctx in
+            color.setFill()
+            ctx.cgContext.fillEllipse(in: CGRect(origin: .zero, size: size))
+        }.withRenderingMode(.alwaysOriginal)
+    }
+}
+
+// MARK: - UITextFieldDelegate
+
+extension TopicComposerViewController: UITextFieldDelegate {
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+        if textField === titleField {
+            tagField.becomeFirstResponder()
+        } else if textField === tagField {
+            let text = (tagField.text ?? "").trimmingCharacters(in: .whitespaces)
+            if !text.isEmpty {
+                selectTag(text)
+            }
+            bodyTextView.becomeFirstResponder()
+        }
+        return true
+    }
+}
+
+// MARK: - UITableViewDataSource & Delegate (Tag Suggestions)
+
+extension TopicComposerViewController: UITableViewDataSource, UITableViewDelegate {
+    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+        viewModel.tagSuggestions.count
+    }
+
+    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "TagCell", for: indexPath)
+        let tag = viewModel.tagSuggestions[indexPath.row]
+        var content = cell.defaultContentConfiguration()
+        content.text = tag.text
+        content.secondaryText = "\(tag.count)"
+        content.textProperties.font = .systemFont(ofSize: 15)
+        content.secondaryTextProperties.font = .systemFont(ofSize: 13)
+        content.secondaryTextProperties.color = .secondaryLabel
+        cell.contentConfiguration = content
+        cell.backgroundColor = .systemBackground
+        return cell
+    }
+
+    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
+        tableView.deselectRow(at: indexPath, animated: true)
+        let tag = viewModel.tagSuggestions[indexPath.row]
+        selectTag(tag.text)
+    }
+}
+
+// MARK: - UITextViewDelegate
+
+extension TopicComposerViewController: UITextViewDelegate {
+    func textViewDidChange(_ textView: UITextView) {
+        viewModel.body = textView.text
+        bodyPlaceholder.isHidden = !textView.text.isEmpty
+    }
+}
+
+// MARK: - PHPickerViewControllerDelegate
+
+extension TopicComposerViewController: PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true)
+        guard let provider = results.first?.itemProvider, provider.canLoadObject(ofClass: UIImage.self) else { return }
+        provider.loadObject(ofClass: UIImage.self) { [weak self] object, _ in
+            guard let image = object as? UIImage else { return }
+            Task { @MainActor in
+                self?.uploadImage(image)
+            }
+        }
+    }
+}
