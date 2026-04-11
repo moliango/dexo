@@ -16,6 +16,7 @@ final class TopicComposerViewController: ObservableViewController {
         tf.placeholder = String(localized: "compose.title.placeholder")
         tf.font = .systemFont(ofSize: 17, weight: .semibold)
         tf.borderStyle = .none
+        tf.backgroundColor = .clear
         tf.translatesAutoresizingMaskIntoConstraints = false
         tf.returnKeyType = .next
         return tf
@@ -45,6 +46,7 @@ final class TopicComposerViewController: ObservableViewController {
         tf.placeholder = String(localized: "compose.tags.placeholder")
         tf.font = .systemFont(ofSize: 15)
         tf.borderStyle = .none
+        tf.backgroundColor = .clear
         tf.translatesAutoresizingMaskIntoConstraints = false
         tf.returnKeyType = .done
         tf.autocapitalizationType = .none
@@ -91,6 +93,7 @@ final class TopicComposerViewController: ObservableViewController {
     private let bodyTextView: UITextView = {
         let tv = UITextView()
         tv.font = .systemFont(ofSize: 16)
+        tv.backgroundColor = .clear
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         return tv

@@ -13,6 +13,7 @@ final class ReplyComposerViewController: BaseViewController {
     private let textView: UITextView = {
         let tv = UITextView()
         tv.font = .systemFont(ofSize: 16)
+        tv.backgroundColor = .clear
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
         return tv
