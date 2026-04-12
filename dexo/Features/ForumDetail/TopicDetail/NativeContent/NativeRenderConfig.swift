@@ -57,6 +57,7 @@ enum NativeContentRenderer {
         OneboxRenderer.self,
         VideoRenderer.self,
         TableRenderer.self,
+        PollRenderer.self,
     ]
 
     static func canRenderNatively(_ blocks: [ContentBlock]) -> Bool {
@@ -81,18 +82,25 @@ enum NativeContentRenderer {
     static func renderBlocks(
         _ annotatedBlocks: [AnnotatedBlock],
         config: NativeRenderConfig,
-        delegate: PostCellDelegate?
+        delegate: PostCellDelegate?,
+        pollProvider: ((String) -> (poll: DiscourseTopicDetail.Poll, votedOptionIds: Set<String>, post: DiscourseTopicDetail.Post)?)? = nil
     ) -> [UIView] {
         annotatedBlocks.compactMap { annotated in
+            // Poll blocks need extra data from the Post model
+            if case .poll(let name) = annotated.block,
+               let pollData = pollProvider?(name) {
+                return PollRenderer.render(
+                    poll: pollData.poll,
+                    votedOptionIds: pollData.votedOptionIds,
+                    post: pollData.post,
+                    containerWidth: config.contentWidth,
+                    delegate: delegate
+                )
+            }
             for renderer in renderers where renderer.canRender(annotated.block) {
                 return renderer.render(annotated.block, config: config, delegate: delegate)
             }
-            // No native renderer — fall back to WebView snapshot
-            return FallbackBlockView(
-                html: annotated.sourceHTML,
-                containerWidth: config.contentWidth,
-                baseURL: config.baseURL ?? ""
-            )
+            return nil
         }
     }
 }

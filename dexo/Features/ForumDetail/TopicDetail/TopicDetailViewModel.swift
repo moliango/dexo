@@ -6,7 +6,6 @@ import CookedHTML
 final class TopicDetailViewModel {
     var topic: DiscourseTopicDetail?
     var parsedBlocks: [Int: [AnnotatedBlock]] = [:]
-    var unsupportedPostIds: Set<Int> = []
     var isLoading = false
     var isReady = false
     var isLoadingMore = false
@@ -85,8 +84,6 @@ final class TopicDetailViewModel {
         isReady = false
         errorMessage = nil
         parsedBlocks = [:]
-        unsupportedPostIds = []
-
         do {
             let detail = try await api.fetchTopic(id: id)
             topic = detail
@@ -237,7 +234,6 @@ final class TopicDetailViewModel {
         // Clear current posts
         topic?.postStream.posts.removeAll()
         parsedBlocks.removeAll()
-        unsupportedPostIds.removeAll()
         loadedPostIds.removeAll()
         firstPost = nil
 
@@ -305,18 +301,22 @@ final class TopicDetailViewModel {
         self.topic = topic
     }
 
+    func updatePoll(_ updatedPoll: DiscourseTopicDetail.Poll, votes: [String], forPostId postId: Int, pollName: String) {
+        guard var topic else { return }
+        guard let postIndex = topic.postStream.posts.firstIndex(where: { $0.id == postId }) else { return }
+        if let pollIndex = topic.postStream.posts[postIndex].polls.firstIndex(where: { $0.name == pollName }) {
+            topic.postStream.posts[postIndex].polls[pollIndex] = updatedPoll
+        }
+        topic.postStream.posts[postIndex].pollsVotes[pollName] = votes
+        self.topic = topic
+        // Re-parse to trigger UI update
+        parseAndStore(post: topic.postStream.posts[postIndex])
+    }
+
     // MARK: - Private
 
     private func parseAndStore(post: DiscourseTopicDetail.Post) {
         let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: api.baseURL)
         parsedBlocks[post.id] = annotated
-
-        // Check if any block has no native renderer
-        let hasUnsupported = annotated.contains { ab in
-            !NativeContentRenderer.renderers.contains { $0.canRender(ab.block) }
-        }
-        if hasUnsupported {
-            unsupportedPostIds.insert(post.id)
-        }
     }
 }

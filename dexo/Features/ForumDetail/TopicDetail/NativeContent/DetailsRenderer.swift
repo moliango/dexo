@@ -137,8 +137,12 @@ private class DetailsCardView: UIView {
 
         invalidateIntrinsicContentSize()
         if let tableView = findTableView() {
+            let offset = tableView.contentOffset
             tableView.beginUpdates()
             tableView.endUpdates()
+            if abs(tableView.contentOffset.y - offset.y) > 1 {
+                tableView.contentOffset = offset
+            }
         }
     }
 

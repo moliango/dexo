@@ -78,6 +78,32 @@ struct DiscourseTopicDetail: Decodable {
         }
     }
 
+    struct Poll: Decodable {
+        let name: String
+        let type: String          // "regular" or "multiple"
+        let status: String        // "open" or "closed"
+        let isPublic: Bool
+        let results: String       // "always", "on_vote", "on_close", "staff_only"
+        let min: Int?
+        let max: Int?
+        let options: [PollOption]
+        let voters: Int
+        let chartType: String?
+        let title: String?
+
+        enum CodingKeys: String, CodingKey {
+            case name, type, status, results, min, max, options, voters, title
+            case isPublic = "public"
+            case chartType = "chart_type"
+        }
+    }
+
+    struct PollOption: Decodable {
+        let id: String
+        let html: String
+        let votes: Int
+    }
+
     struct Boost: Decodable, Identifiable, Sendable {
         let id: Int
         let cooked: String
@@ -115,6 +141,8 @@ struct DiscourseTopicDetail: Decodable {
         let currentUserUsedMainReaction: Bool
         var boosts: [Boost]
         var canBoost: Bool
+        var polls: [Poll]
+        var pollsVotes: [String: [String]]
 
         enum CodingKeys: String, CodingKey {
             case id, name, username, cooked
@@ -136,6 +164,8 @@ struct DiscourseTopicDetail: Decodable {
             case currentUserUsedMainReaction = "current_user_used_main_reaction"
             case boosts
             case canBoost = "can_boost"
+            case polls
+            case pollsVotes = "polls_votes"
         }
 
         init(from decoder: Decoder) throws {
@@ -163,6 +193,8 @@ struct DiscourseTopicDetail: Decodable {
             currentUserUsedMainReaction = (try? container.decodeIfPresent(Bool.self, forKey: .currentUserUsedMainReaction)) ?? false
             boosts = (try? container.decodeIfPresent([Boost].self, forKey: .boosts)) ?? []
             canBoost = (try? container.decodeIfPresent(Bool.self, forKey: .canBoost)) ?? false
+            polls = (try? container.decodeIfPresent([Poll].self, forKey: .polls)) ?? []
+            pollsVotes = (try? container.decodeIfPresent([String: [String]].self, forKey: .pollsVotes)) ?? [:]
         }
     }
 }

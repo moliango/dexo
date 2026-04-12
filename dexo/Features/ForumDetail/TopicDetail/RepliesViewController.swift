@@ -16,7 +16,6 @@ final class RepliesViewController: BaseViewController {
 
     private var replies: [DiscourseTopicDetail.Post] = []
     private var parsedBlocks: [Int: [AnnotatedBlock]] = [:]
-    private var unsupportedPostIds: Set<Int> = []
     private var expandedBoostPostIds: Set<Int> = []
 
     private lazy var tableView: UITableView = {
@@ -42,7 +41,6 @@ final class RepliesViewController: BaseViewController {
             }
             let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
             let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
-            let hasUnsupported = self.unsupportedPostIds.contains(postId)
             let floorNumber = (self.replies.firstIndex(where: { $0.id == postId }) ?? 0) + 1
             let isBoostsExpanded = self.expandedBoostPostIds.contains(postId)
             cell.configure(
@@ -54,8 +52,6 @@ final class RepliesViewController: BaseViewController {
                 postLink: postLink,
                 baseURL: self.baseURL,
                 assetBaseURL: self.assetBaseURL,
-                hasUnsupportedBlocks: hasUnsupported,
-                cookedHTML: post.cooked,
                 validReactions: [],
                 isBoostsExpanded: isBoostsExpanded,
                 showsSeparator: !isBoostsExpanded,
@@ -146,18 +142,11 @@ final class RepliesViewController: BaseViewController {
             let response = try await api.fetchPostReplies(postId: postId)
             replies = response
             parsedBlocks = [:]
-            unsupportedPostIds = []
             expandedBoostPostIds = []
 
             for post in response {
                 let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: baseURL)
                 parsedBlocks[post.id] = annotated
-                let hasUnsupported = annotated.contains { ab in
-                    !NativeContentRenderer.renderers.contains { $0.canRender(ab.block) }
-                }
-                if hasUnsupported {
-                    unsupportedPostIds.insert(post.id)
-                }
             }
 
             applySnapshot()
@@ -369,5 +358,13 @@ extension RepliesViewController: PostCellDelegate {
             }
         })
         present(alert, animated: true)
+    }
+
+    func postCell(didVotePoll pollName: String, options: [String], forPost post: DiscourseTopicDetail.Post) {
+        // Voting not supported in replies sheet
+    }
+
+    func postCell(didRemovePollVote pollName: String, forPost post: DiscourseTopicDetail.Post) {
+        // Voting not supported in replies sheet
     }
 }

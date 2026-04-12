@@ -6,12 +6,12 @@ final class PostNativeCell: UITableViewCell {
     static let reuseIdentifier = "PostNativeCell"
     static let headerHeight: CGFloat = 44
     static let bottomBarHeight: CGFloat = 30
+    private static let symbolConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
 
     weak var delegate: PostCellDelegate?
     private var postId: Int = 0
     private var postLink: String?
     private var currentPost: DiscourseTopicDetail.Post?
-    private var cookedHTML: String = ""
     private var validReactions: [String] = []
 
     // MARK: - Header UI
@@ -78,15 +78,6 @@ final class PostNativeCell: UITableViewCell {
         return label
     }()
 
-    private let sourceButton: UIButton = {
-        let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
-        button.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
-        button.tintColor = .tertiaryLabel
-        button.isHidden = true
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
 
     private let replyToLabel: UILabel = {
         let label = UILabel()
@@ -157,7 +148,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let reactButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = PostNativeCell.symbolConfig
         button.setImage(UIImage(systemName: "heart", withConfiguration: config), for: .normal)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -173,7 +164,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let bookmarkButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = PostNativeCell.symbolConfig
         button.setImage(UIImage(systemName: "bookmark", withConfiguration: config), for: .normal)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -182,7 +173,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let copyLinkButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = PostNativeCell.symbolConfig
         button.setImage(UIImage(systemName: "link", withConfiguration: config), for: .normal)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -191,7 +182,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let replyButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = PostNativeCell.symbolConfig
         button.setImage(UIImage(systemName: "arrowshape.turn.up.left", withConfiguration: config), for: .normal)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -224,7 +215,6 @@ final class PostNativeCell: UITableViewCell {
         contentView.addSubview(userTitleLabel)
         contentView.addSubview(timeLabel)
         contentView.addSubview(floorLabel)
-        contentView.addSubview(sourceButton)
         contentView.addSubview(replyToLabel)
         contentView.addSubview(contentStackView)
         bottomLeftStack.addArrangedSubview(showRepliesButton)
@@ -265,11 +255,6 @@ final class PostNativeCell: UITableViewCell {
 
             replyToLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
             replyToLabel.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -8),
-
-            sourceButton.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
-            sourceButton.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -6),
-            sourceButton.widthAnchor.constraint(equalToConstant: 24),
-            sourceButton.heightAnchor.constraint(equalToConstant: 24),
 
             floorLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
             floorLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
@@ -314,7 +299,6 @@ final class PostNativeCell: UITableViewCell {
         showRepliesButton.addTarget(self, action: #selector(repliesButtonTapped), for: .touchUpInside)
         copyLinkButton.addTarget(self, action: #selector(copyLinkTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
-        sourceButton.addTarget(self, action: #selector(sourceButtonTapped), for: .touchUpInside)
         boostButton.addTarget(self, action: #selector(boostButtonTapped), for: .touchUpInside)
         bookmarkButton.addTarget(self, action: #selector(bookmarkButtonTapped), for: .touchUpInside)
 
@@ -332,8 +316,6 @@ final class PostNativeCell: UITableViewCell {
         postLink: String?,
         baseURL: String,
         assetBaseURL: String,
-        hasUnsupportedBlocks: Bool,
-        cookedHTML: String,
         validReactions: [String],
         isBoostsExpanded: Bool,
         showsSeparator: Bool,
@@ -342,9 +324,7 @@ final class PostNativeCell: UITableViewCell {
         self.postLink = postLink
         currentPost = post
         self.delegate = delegate
-        self.cookedHTML = cookedHTML
         self.validReactions = validReactions
-        sourceButton.isHidden = !hasUnsupportedBlocks
         separatorLine.isHidden = !showsSeparator
 
         nameLabel.text = post.name
@@ -396,7 +376,7 @@ final class PostNativeCell: UITableViewCell {
         // Boost
         let boostCount = post.boosts.count
         let hasMine = post.boosts.contains { $0.canDelete == true }
-        let boostConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let boostConfig = Self.symbolConfig
         let boostIcon = (isBoostsExpanded || hasMine) ? "bolt.fill" : "bolt"
         boostButton.setImage(UIImage(systemName: boostIcon, withConfiguration: boostConfig), for: .normal)
         boostButton.setTitle(boostCount > 0 ? " \(boostCount)" : nil, for: .normal)
@@ -409,13 +389,17 @@ final class PostNativeCell: UITableViewCell {
 
         // Bookmark
         let bookmarkSymbol = post.bookmarked ? "bookmark.fill" : "bookmark"
-        let bookmarkConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let bookmarkConfig = Self.symbolConfig
         bookmarkButton.setImage(UIImage(systemName: bookmarkSymbol, withConfiguration: bookmarkConfig), for: .normal)
         bookmarkButton.tintColor = post.bookmarked ? .systemYellow : .tertiaryLabel
 
         // Render content blocks
         contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        let views = NativeContentRenderer.renderBlocks(annotatedBlocks, config: config, delegate: delegate)
+        let views = NativeContentRenderer.renderBlocks(annotatedBlocks, config: config, delegate: delegate) { name in
+            guard let poll = post.polls.first(where: { $0.name == name }) else { return nil }
+            let voted = Set(post.pollsVotes[name] ?? [])
+            return (poll, voted, post)
+        }
         for view in views {
             setupTextViews(in: view)
             contentStackView.addArrangedSubview(view)
@@ -536,23 +520,12 @@ final class PostNativeCell: UITableViewCell {
     @objc private func copyLinkTapped() {
         guard let link = postLink else { return }
         UIPasteboard.general.string = link
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = Self.symbolConfig
         copyLinkButton.setImage(UIImage(systemName: "checkmark", withConfiguration: config), for: .normal)
         copyLinkButton.tintColor = .systemGreen
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
             self?.copyLinkButton.setImage(UIImage(systemName: "link", withConfiguration: config), for: .normal)
             self?.copyLinkButton.tintColor = .tertiaryLabel
-        }
-    }
-
-    @objc private func sourceButtonTapped() {
-        UIPasteboard.general.string = cookedHTML
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
-        sourceButton.setImage(UIImage(systemName: "checkmark", withConfiguration: config), for: .normal)
-        sourceButton.tintColor = .systemGreen
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
-            self?.sourceButton.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
-            self?.sourceButton.tintColor = .tertiaryLabel
         }
     }
 
@@ -655,7 +628,7 @@ final class PostNativeCell: UITableViewCell {
 
     @objc private func bookmarkButtonTapped() {
         guard let post = currentPost else { return }
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = Self.symbolConfig
         let isFilled = bookmarkButton.image(for: .normal) == UIImage(systemName: "bookmark.fill", withConfiguration: config)
         if isFilled {
             bookmarkButton.setImage(UIImage(systemName: "bookmark", withConfiguration: config), for: .normal)
@@ -669,7 +642,7 @@ final class PostNativeCell: UITableViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        // Cancel block-level image loads and fallback renders
+        // Cancel block-level image loads
         for view in contentStackView.arrangedSubviews {
             if let container = view as? TappableImageContainer {
                 container.cancelImageLoad()
@@ -677,8 +650,6 @@ final class PostNativeCell: UITableViewCell {
                 onebox.cancelImageLoad()
             } else if let video = view as? VideoCardView {
                 video.cancelImageLoad()
-            } else if let fallback = view as? FallbackBlockView {
-                fallback.cancelRender()
             }
         }
         contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
@@ -686,7 +657,6 @@ final class PostNativeCell: UITableViewCell {
         postId = 0
         postLink = nil
         currentPost = nil
-        cookedHTML = ""
         usernameLabel.text = nil
         timeLabel.text = nil
         floorLabel.text = nil
@@ -694,7 +664,6 @@ final class PostNativeCell: UITableViewCell {
         replyToLabel.text = nil
         replyToLabel.isHidden = true
         showRepliesButton.isHidden = true
-        sourceButton.isHidden = true
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
         userTitleLabel.text = nil
@@ -711,7 +680,7 @@ final class PostNativeCell: UITableViewCell {
         }
         reactionCountLabel.isHidden = true
         validReactions = []
-        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        let config = Self.symbolConfig
         boostButton.setImage(UIImage(systemName: "bolt", withConfiguration: config), for: .normal)
         boostButton.setTitle(nil, for: .normal)
         boostButton.tintColor = .tertiaryLabel
@@ -721,18 +690,24 @@ final class PostNativeCell: UITableViewCell {
         bookmarkButton.tintColor = .tertiaryLabel
         copyLinkButton.setImage(UIImage(systemName: "link", withConfiguration: config), for: .normal)
         copyLinkButton.tintColor = .tertiaryLabel
-        sourceButton.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
-        sourceButton.tintColor = .tertiaryLabel
         separatorLine.isHidden = false
     }
 
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    private static let relativeFormatter: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .abbreviated
+        return f
+    }()
+
     private static func formatDate(_ isoString: String) -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        guard let date = formatter.date(from: isoString) else { return isoString }
-        let relative = RelativeDateTimeFormatter()
-        relative.unitsStyle = .abbreviated
-        return relative.localizedString(for: date, relativeTo: Date())
+        guard let date = isoFormatter.date(from: isoString) else { return isoString }
+        return relativeFormatter.localizedString(for: date, relativeTo: Date())
     }
 }
 

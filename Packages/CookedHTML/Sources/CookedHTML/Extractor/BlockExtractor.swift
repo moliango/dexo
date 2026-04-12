@@ -292,6 +292,12 @@ enum BlockExtractor {
             return extractVideo(from: element, options: options)
         }
 
+        // Discourse poll block
+        if classAttr.contains("poll") {
+            let pollName = (try? element.attr("data-poll-name")) ?? "poll"
+            return [.poll(name: pollName)]
+        }
+
         // Block-level spoiler: wrap all child blocks in a single .spoiler container
         if classAttr.contains("spoiler") {
             let inner = extract(from: element, options: options)

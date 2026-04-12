@@ -22,6 +22,8 @@ final class TopicDetailViewController: ObservableViewController {
     private var suppressLoadEarlier = false
     /// Anchor info for restoring scroll position after loading earlier posts
     private var earlierLoadAnchor: (postId: Int, cellTopOffset: CGFloat)?
+    /// Cache actual cell heights to avoid jumps from inaccurate estimates
+    private var cellHeightCache: [TopicDetailItem: CGFloat] = [:]
 
     private lazy var tableView: UITableView = {
         let tv = ThemedTableView(frame: .zero, style: .plain)
@@ -60,8 +62,6 @@ final class TopicDetailViewController: ObservableViewController {
             }
             let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
             let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
-            let hasUnsupported = self.viewModel.unsupportedPostIds.contains(postId)
-
             let isBoostsExpanded = self.viewModel.expandedBoostPostIds.contains(postId)
             let showsSeparator = !isBoostsExpanded
             cell.configure(
@@ -73,8 +73,6 @@ final class TopicDetailViewController: ObservableViewController {
                 postLink: postLink,
                 baseURL: self.baseURL,
                 assetBaseURL: self.assetBaseURL,
-                hasUnsupportedBlocks: hasUnsupported,
-                cookedHTML: post.cooked,
                 validReactions: self.viewModel.topic?.validReactions ?? [],
                 isBoostsExpanded: isBoostsExpanded,
                 showsSeparator: showsSeparator,
@@ -311,11 +309,13 @@ final class TopicDetailViewController: ObservableViewController {
             errorLabel.isHidden = true
         }
 
-        // Footer spinner
+        // Footer spinner — avoid replacing tableFooterView repeatedly as it changes contentSize
         if viewModel.isLoadingMore {
-            tableView.tableFooterView = footerSpinner
+            if tableView.tableFooterView !== footerSpinner {
+                tableView.tableFooterView = footerSpinner
+            }
             footerSpinner.startAnimating()
-        } else {
+        } else if footerSpinner.isAnimating {
             footerSpinner.stopAnimating()
             tableView.tableFooterView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
         }
@@ -351,6 +351,11 @@ final class TopicDetailViewController: ObservableViewController {
             }
             snapshot.appendItems(items, toSection: 0)
 
+            // Skip snapshot application if items haven't changed — avoids unnecessary layout recalculation
+            let currentSnapshot = dataSource.snapshot()
+            let needsApply = earlierLoadAnchor != nil
+                || snapshot.itemIdentifiers != currentSnapshot.itemIdentifiers
+
             // Restore scroll position when earlier posts were prepended
             if let anchor = earlierLoadAnchor {
                 earlierLoadAnchor = nil
@@ -364,8 +369,16 @@ final class TopicDetailViewController: ObservableViewController {
                 }
                 CATransaction.commit()
                 isLoadingEarlierLocally = false
-            } else {
+            } else if needsApply {
+                // Preserve scroll position when table already has content (e.g. load-more append).
+                // apply(animatingDifferences:false) can recalculate cell heights — if any visible
+                // cell changed height from async loads, the offset jumps.
+                let hasExistingRows = dataSource.snapshot().numberOfItems > 0
+                let offsetBefore = hasExistingRows ? tableView.contentOffset : nil
                 dataSource.apply(snapshot, animatingDifferences: false)
+                if let offsetBefore, abs(tableView.contentOffset.y - offsetBefore.y) > 1 {
+                    tableView.contentOffset = offsetBefore
+                }
             }
 
             // After a jump, defer scroll to next layout pass so cells are sized
@@ -687,6 +700,7 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
             self.showJumpOverlay()
             self.hasTitleHeader = false
             self.suppressLoadEarlier = true
+            self.cellHeightCache.removeAll()
             Task {
                 await self.viewModel.jumpToFloor(floor, containerWidth: self.view.bounds.width)
                 self.hideJumpOverlay()
@@ -725,7 +739,11 @@ extension TopicDetailViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
-        200
+        if let item = dataSource.itemIdentifier(for: indexPath),
+           let cached = cellHeightCache[item] {
+            return cached
+        }
+        return 200
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -776,12 +794,23 @@ extension TopicDetailViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        // Cache cell height for accurate estimates
+        if let item = dataSource.itemIdentifier(for: indexPath) {
+            cellHeightCache[item] = cell.bounds.height
+        }
+
         let totalRows = tableView.numberOfRows(inSection: 0)
         // Load more (forward)
         if indexPath.row >= totalRows - 3 {
             Task {
                 await viewModel.loadMorePosts(containerWidth: view.bounds.width)
             }
+        }
+    }
+
+    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        if let item = dataSource.itemIdentifier(for: indexPath) {
+            cellHeightCache[item] = cell.bounds.height
         }
     }
 }
@@ -954,6 +983,39 @@ extension TopicDetailViewController: PostCellDelegate {
             }
         })
         present(alert, animated: true)
+    }
+
+    func postCell(didVotePoll pollName: String, options: [String], forPost post: DiscourseTopicDetail.Post) {
+        Task {
+            do {
+                let response = try await api.votePoll(postId: post.id, pollName: pollName, options: options)
+                viewModel.updatePoll(response.poll, votes: response.vote ?? options, forPostId: post.id, pollName: pollName)
+                reconfigurePost(post.id)
+            } catch {
+                // TODO: show error
+            }
+        }
+    }
+
+    func postCell(didRemovePollVote pollName: String, forPost post: DiscourseTopicDetail.Post) {
+        Task {
+            do {
+                let response = try await api.removePollVote(postId: post.id, pollName: pollName)
+                viewModel.updatePoll(response.poll, votes: response.vote ?? [], forPostId: post.id, pollName: pollName)
+                reconfigurePost(post.id)
+            } catch {
+                // TODO: show error
+            }
+        }
+    }
+
+    private func reconfigurePost(_ postId: Int) {
+        var snapshot = dataSource.snapshot()
+        let item = TopicDetailItem.post(postId)
+        if snapshot.itemIdentifiers.contains(item) {
+            snapshot.reconfigureItems([item])
+            dataSource.apply(snapshot, animatingDifferences: false)
+        }
     }
 
 }

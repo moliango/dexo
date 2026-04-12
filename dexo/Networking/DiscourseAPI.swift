@@ -218,6 +218,32 @@ final class DiscourseAPI {
         }
     }
 
+    struct PollVoteResponse: Decodable {
+        let poll: DiscourseTopicDetail.Poll
+        let vote: [String]?
+    }
+
+    func votePoll(postId: Int, pollName: String, options: [String]) async throws -> PollVoteResponse {
+        try await request(
+            route: .votePoll,
+            parameters: [
+                "post_id": postId,
+                "poll_name": pollName,
+                "options": options,
+            ]
+        )
+    }
+
+    func removePollVote(postId: Int, pollName: String) async throws -> PollVoteResponse {
+        try await request(
+            route: .removePollVote,
+            parameters: [
+                "post_id": postId,
+                "poll_name": pollName,
+            ]
+        )
+    }
+
     func fetchBookmarks(username: String) async throws -> DiscourseBookmarkList {
         try await request(route: .bookmarks(username: username))
     }

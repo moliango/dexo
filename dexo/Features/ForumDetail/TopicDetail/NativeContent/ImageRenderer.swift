@@ -80,6 +80,20 @@ final class TappableImageContainer: UIView {
             if !hasOriginalSize {
                 let ratio = containerWidth / image.size.width
                 self.imageHeightConstraint.constant = image.size.height * ratio
+                // Notify the owning table view to update cell height without jumping
+                var view: UIView? = self.superview
+                while let v = view {
+                    if let tableView = v as? UITableView {
+                        let offset = tableView.contentOffset
+                        tableView.beginUpdates()
+                        tableView.endUpdates()
+                        if abs(tableView.contentOffset.y - offset.y) > 1 {
+                            tableView.contentOffset = offset
+                        }
+                        break
+                    }
+                    view = v.superview
+                }
             }
         }
 

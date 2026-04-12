@@ -36,6 +36,7 @@ public enum ContentBlock: Sendable, Equatable {
     case table(headers: [[ContentBlock]], rows: [[[ContentBlock]]])
     case details(summary: [InlineNode], content: [ContentBlock])
     case spoiler(blocks: [ContentBlock])
+    case poll(name: String)
     case divider
     case rawHTML(String)
 }
