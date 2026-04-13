@@ -62,7 +62,7 @@ final class BoostDanmakuCell: DanmakuCell {
     required init(frame: CGRect) {
         super.init(frame: frame)
         displayAsync = false
-        backgroundColor = .secondarySystemBackground
+        backgroundColor = ThemeManager.shared.codeBackgroundColor
         addSubview(avatarImageView)
         addSubview(textView)
     }

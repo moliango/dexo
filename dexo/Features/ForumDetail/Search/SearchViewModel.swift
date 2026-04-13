@@ -32,7 +32,15 @@ final class SearchViewModel {
     var categories: [DiscourseCategory] = []
     var selectedCategoryId: Int?
     var selectedTag: String?
-    var selectedSortOrder: SearchSortOrder = .latest
+    var selectedSortOrder: SearchSortOrder = {
+        if let raw = UserDefaults.standard.string(forKey: "searchSortOrder"),
+           let order = SearchSortOrder(rawValue: raw) {
+            return order
+        }
+        return .latest
+    }() {
+        didSet { UserDefaults.standard.set(selectedSortOrder.rawValue, forKey: "searchSortOrder") }
+    }
 
     private let api: DiscourseAPI
     private var currentPage = 0

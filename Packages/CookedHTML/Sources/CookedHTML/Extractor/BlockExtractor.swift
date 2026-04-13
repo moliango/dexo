@@ -186,7 +186,40 @@ enum BlockExtractor {
 
         let inlines = InlineExtractor.extract(from: element, options: options)
         if inlines.isEmpty { return [] }
-        return [.paragraph(inlines)]
+
+        // Split large non-emoji images out of mixed paragraphs into block-level images.
+        // e.g. <p>some text<br><img width="281" height="500"></p>
+        //   → .paragraph("some text") + .image(...)
+        return splitLargeImages(from: inlines)
+    }
+
+    /// Splits a list of inline nodes: text portions become `.paragraph`, large images become `.image`.
+    private static func splitLargeImages(from inlines: [InlineNode]) -> [ContentBlock] {
+        var blocks: [ContentBlock] = []
+        var pending: [InlineNode] = []
+
+        func flushPending() {
+            // Trim trailing lineBreaks
+            while pending.last == .lineBreak { pending.removeLast() }
+            let trimmed = pending.trimmedWhitespace()
+            if !trimmed.isEmpty {
+                blocks.append(.paragraph(trimmed))
+            }
+            pending.removeAll()
+        }
+
+        for node in inlines {
+            if case .image(let src, let alt, let width, let height, let isEmoji) = node,
+               !isEmoji, let w = width, let h = height, w > 80 || h > 80 {
+                flushPending()
+                blocks.append(.image(src: src, alt: alt, width: w, height: h))
+            } else {
+                pending.append(node)
+            }
+        }
+        flushPending()
+
+        return blocks.isEmpty ? [.paragraph(inlines)] : blocks
     }
 
     private static func extractHeading(from element: Element, level: Int, options: ParseOptions) -> [ContentBlock] {

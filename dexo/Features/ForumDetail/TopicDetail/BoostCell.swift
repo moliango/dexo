@@ -165,7 +165,7 @@ private final class BoostActionChipView: UIControl {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .tertiarySystemFill
+        backgroundColor = ThemeManager.shared.codeBackgroundColor
         addSubview(iconView)
         addSubview(titleLabel)
         addTarget(self, action: #selector(handleTap), for: .touchUpInside)
@@ -251,7 +251,7 @@ private final class BoostChipView: UIView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        backgroundColor = .secondarySystemFill
+        backgroundColor = ThemeManager.shared.codeBackgroundColor
         addSubview(avatarImageView)
         addSubview(textView)
 
