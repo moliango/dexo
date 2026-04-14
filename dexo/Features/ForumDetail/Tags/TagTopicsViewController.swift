@@ -11,6 +11,7 @@ private final class TagTopicsViewModel {
     private let tagName: String
     private var currentPage = 0
     private var usersById: [Int: DiscourseTopicList.User] = [:]
+    private var categoriesById: [Int: DiscourseCategory] = [:]
 
     init(api: DiscourseAPI, tagName: String) {
         self.api = api
@@ -22,11 +23,19 @@ private final class TagTopicsViewModel {
         return usersById[firstPoster.userId]?.avatarTemplate
     }
 
+    func category(for topic: DiscourseTopicList.Topic) -> DiscourseCategory? {
+        guard let catId = topic.categoryId else { return nil }
+        return categoriesById[catId]
+    }
+
     func loadTopics() async {
         isLoading = true
         currentPage = 0
         do {
-            let result = try await api.fetchTagTopics(name: tagName, page: 0)
+            async let topicsResult = api.fetchTagTopics(name: tagName, page: 0)
+            async let categoriesResult = loadCategoriesIfNeeded()
+            let result = try await topicsResult
+            _ = await categoriesResult
             topics = result.topicList.topics
             canLoadMore = result.topicList.moreTopicsUrl != nil
             indexUsers(result.users)
@@ -60,6 +69,25 @@ private final class TagTopicsViewModel {
             usersById[user.id] = user
         }
     }
+
+    private func loadCategoriesIfNeeded() async {
+        guard categoriesById.isEmpty else { return }
+        do {
+            let list = try await api.fetchCategories()
+            indexCategories(list.categoryList.categories)
+        } catch {
+            // Silently fail
+        }
+    }
+
+    private func indexCategories(_ categories: [DiscourseCategory]) {
+        for cat in categories {
+            categoriesById[cat.id] = cat
+            if let subs = cat.subcategoryList {
+                indexCategories(subs)
+            }
+        }
+    }
 }
 
 final class TagTopicsViewController: ObservableViewController {
@@ -72,6 +100,7 @@ final class TagTopicsViewController: ObservableViewController {
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(TopicCell.self, forCellReuseIdentifier: TopicCell.reuseIdentifier)
         tv.delegate = self
+        tv.tableHeaderView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
         return tv
     }()
 
@@ -89,11 +118,13 @@ final class TagTopicsViewController: ObservableViewController {
             let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
             avatarURL = URL(string: urlString)
         }
+        let category = self.viewModel.category(for: topic)
+        let categoryColor: UIColor? = category.flatMap { Self.color(fromHex: $0.color) }
         cell.configure(
             with: topic,
             avatarURL: avatarURL,
-            categoryName: nil,
-            categoryColor: nil
+            categoryName: category?.name,
+            categoryColor: categoryColor
         )
         return cell
     }
@@ -188,6 +219,19 @@ final class TagTopicsViewController: ObservableViewController {
     }
 }
 
+extension TagTopicsViewController {
+    fileprivate static func color(fromHex hex: String) -> UIColor? {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard cleaned.count == 6, let rgb = UInt64(cleaned, radix: 16) else { return nil }
+        return UIColor(
+            red: CGFloat((rgb >> 16) & 0xFF) / 255,
+            green: CGFloat((rgb >> 8) & 0xFF) / 255,
+            blue: CGFloat(rgb & 0xFF) / 255,
+            alpha: 1
+        )
+    }
+}
+
 extension TagTopicsViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
@@ -198,7 +242,7 @@ extension TagTopicsViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         let totalRows = tableView.numberOfRows(inSection: 0)
-        if indexPath.row >= totalRows - 5 {
+        if indexPath.row >= totalRows - 1 {
             Task {
                 await viewModel.loadMoreTopics()
             }

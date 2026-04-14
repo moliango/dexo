@@ -23,6 +23,8 @@ final class TopicDetailViewModel {
     private(set) var loadedRangeEnd: Int = 0
     /// Cached first post (OP) to preserve across jumpToFloor
     private var firstPost: DiscourseTopicDetail.Post?
+    /// Prevent rapid-fire stream refreshes when already at the end
+    private var lastStreamRefresh: Date = .distantPast
 
     init(api: DiscourseAPI) {
         self.api = api
@@ -128,7 +130,20 @@ final class TopicDetailViewModel {
     }
 
     func loadMorePosts(containerWidth: CGFloat) async {
-        guard canLoadMore, !isLoadingMore, let topicId = topic?.id else { return }
+        guard !isLoadingMore, let topicId = topic?.id else { return }
+
+        // If we've reached the end, refresh the stream to check for new posts
+        if !canLoadMore {
+            // Throttle: at most once every 10 seconds
+            guard Date.now.timeIntervalSince(lastStreamRefresh) > 10 else { return }
+            isLoadingMore = true
+            await refreshStream(topicId: topicId)
+            if !canLoadMore {
+                isLoadingMore = false
+                return
+            }
+        }
+
         isLoadingMore = true
 
         let newEnd = min(loadedRangeEnd + 20, allPostIds.count)
@@ -314,6 +329,20 @@ final class TopicDetailViewModel {
     }
 
     // MARK: - Private
+
+    /// Re-fetch the topic to pick up any new post IDs appended to the stream.
+    private func refreshStream(topicId: Int) async {
+        lastStreamRefresh = .now
+        do {
+            let detail = try await api.fetchTopic(id: topicId)
+            let freshStream = detail.postStream.stream ?? detail.postStream.posts.map(\.id)
+            if freshStream.count > allPostIds.count {
+                allPostIds = freshStream
+            }
+        } catch {
+            // Silently fail; canLoadMore will remain false
+        }
+    }
 
     private func parseAndStore(post: DiscourseTopicDetail.Post) {
         let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: api.baseURL)

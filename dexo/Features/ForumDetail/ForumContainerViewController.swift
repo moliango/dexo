@@ -18,6 +18,11 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func stopPoller() {
+        notificationPoller?.stop()
+        notificationPoller = nil
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
 
@@ -35,12 +40,23 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
             _ = self.authManager.username(for: self.forum.baseURL)
         } onChange: {
             Task { @MainActor [weak self] in
-                self?.startObservingAuth()
+                guard let self else { return }
+                self.startObservingAuth()
+                // Start poller on login, stop on logout
+                if self.isAuthenticated() {
+                    if self.notificationPoller == nil {
+                        self.startNotificationPoller()
+                    }
+                } else {
+                    self.notificationPoller?.stop()
+                    self.notificationPoller = nil
+                }
             }
         }
     }
 
     private func startNotificationPoller() {
+        guard isAuthenticated() else { return }
         let poller = NotificationPoller(api: api) { [weak self] in
             self?.currentUsername()
         }

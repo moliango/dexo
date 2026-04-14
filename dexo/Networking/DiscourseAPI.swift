@@ -278,7 +278,8 @@ final class DiscourseAPI {
 
     func pollMessageBus(clientId: String, channels: [String: Int]) async throws -> [MessageBusMessage] {
         let route = DiscourseRouter.messageBusPoll(clientId: clientId)
-        let url = baseURL + route.path
+        let mbBase = baseURL.contains("linux.do") ? "https://ping.linux.do" : baseURL
+        let url = mbBase + route.path
         debugLog("[MessageBus] POST \(url) channels=\(channels)")
         let response = await session.request(url, method: route.method, parameters: channels, encoding: URLEncoding.default)
             .serializingData().response

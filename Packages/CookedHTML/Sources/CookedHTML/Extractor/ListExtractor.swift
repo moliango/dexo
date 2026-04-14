@@ -45,7 +45,7 @@ enum ListExtractor {
                         flushInlines()
                         blocks.append(contentsOf: BlockExtractor.extractNode(element, options: options))
                     } else {
-                        pendingInlines.append(contentsOf: InlineExtractor.extract(from: element, options: options, style: []))
+                        pendingInlines.append(contentsOf: InlineExtractor.extractNode(element, options: options))
                     }
                 }
             } else if let textNode = child as? TextNode {

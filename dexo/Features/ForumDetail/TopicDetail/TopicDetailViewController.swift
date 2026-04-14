@@ -145,7 +145,7 @@ final class TopicDetailViewController: ObservableViewController {
     private lazy var topLoadingBar: UIView = {
         let bar = UIView()
         bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.backgroundColor = .secondarySystemBackground
+        bar.backgroundColor = .clear
         bar.alpha = 0
         let spinner = UIActivityIndicatorView(style: .medium)
         spinner.translatesAutoresizingMaskIntoConstraints = false
@@ -831,8 +831,8 @@ extension TopicDetailViewController: UITableViewDelegate {
         }
 
         let totalRows = tableView.numberOfRows(inSection: 0)
-        // Load more (forward)
-        if indexPath.row >= totalRows - 3 {
+        // Load more (forward) — trigger on the last row so the spinner is visible
+        if indexPath.row >= totalRows - 1 {
             Task {
                 await viewModel.loadMorePosts(containerWidth: view.bounds.width)
             }

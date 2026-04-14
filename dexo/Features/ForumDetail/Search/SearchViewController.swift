@@ -447,7 +447,7 @@ extension SearchViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         let totalRows = tableView.numberOfRows(inSection: 0)
-        if indexPath.row >= totalRows - 5 {
+        if indexPath.row >= totalRows - 1 {
             Task {
                 await viewModel.loadMoreResults()
             }

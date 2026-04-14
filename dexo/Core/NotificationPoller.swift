@@ -26,8 +26,7 @@ final class NotificationPoller {
     private var seeded = false
 
     private static let initialDelay: TimeInterval = 3
-    private static let pollInterval: TimeInterval = 60
-    private static let retryDelay: TimeInterval = 10
+    private static let pollInterval: TimeInterval = 180
 
     init(api: DiscourseAPI, usernameProvider: @escaping () -> String?) {
         self.api = api
@@ -90,9 +89,11 @@ final class NotificationPoller {
                 await seedInitialState()
             }
 
+            guard self.userId != nil else { return }
+
             while !Task.isCancelled, self.isActive {
                 let success = await self.pollMessageBus()
-                let delay = success ? Self.pollInterval : Self.retryDelay
+                let delay = Self.pollInterval
                 try? await Task.sleep(for: .seconds(delay))
             }
         }
@@ -101,11 +102,23 @@ final class NotificationPoller {
     /// First poll: fetch current user for initial unread state + user ID,
     /// then seed MessageBus channel positions with -1.
     private func seedInitialState() async {
-        guard let user = try? await api.fetchCurrentUser() else { return }
-        userId = user.id
+        if let user = try? await api.fetchCurrentUser() {
+            userId = user.id
+            // Apply initial unread state from session
+            let total = (user.unreadNotifications ?? 0) + (user.unreadHighPriorityNotifications ?? 0)
+            hasUnreadNotifications = total > 0
+            hasUnreadMessages = (user.unreadPrivateMessages ?? 0) > 0
+        } else if let username = usernameProvider(), !username.isEmpty,
+                  let profile = try? await api.fetchUserProfile(username: username) {
+            userId = profile.id
+        }
+        guard userId != nil else {
+            seeded = true
+            return
+        }
 
         // Seed MessageBus channel positions from /__status response
-        let channel = "/notification/\(user.id)"
+        let channel = "/notification/\(userId!)"
         if let msgs = try? await api.pollMessageBus(clientId: clientId, channels: [channel: -1]) {
             for msg in msgs {
                 if let positions = msg.statusChannelPositions {
@@ -116,6 +129,11 @@ final class NotificationPoller {
                     lastMessageIds[msg.channel] = msg.messageId
                 }
             }
+        }
+
+        // If __status didn't include our channel, default to 0 so we don't keep sending -1
+        if lastMessageIds[channel] == nil {
+            lastMessageIds[channel] = 0
         }
 
         seeded = true

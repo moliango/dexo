@@ -64,8 +64,8 @@ final class TappableImageContainer: UIView {
         imageHeightConstraint = imageView.heightAnchor.constraint(equalToConstant: displayHeight)
         imageHeightConstraint.isActive = true
 
-        backgroundColor = isFullWidth ? .secondarySystemFill : .clear
-        imageView.backgroundColor = .secondarySystemFill
+        backgroundColor = .clear
+        imageView.backgroundColor = .clear
         imageView.layer.cornerRadius = 4
         imageView.clipsToBounds = true
 
@@ -76,7 +76,6 @@ final class TappableImageContainer: UIView {
 
         imageView.sd_setImage(with: url) { [weak self] image, _, _, _ in
             guard let self, let image else { return }
-            self.imageView.backgroundColor = .clear
             if !hasOriginalSize {
                 let ratio = containerWidth / image.size.width
                 self.imageHeightConstraint.constant = image.size.height * ratio

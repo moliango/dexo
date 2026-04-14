@@ -329,7 +329,27 @@ final class PostNativeCell: UITableViewCell {
         self.validReactions = validReactions
         separatorLine.isHidden = !showsSeparator
 
-        nameLabel.text = post.name
+        if post.postNumber == 1 {
+            let attr = NSMutableAttributedString(
+                string: post.name ?? post.username,
+                attributes: [.font: UIFont.systemFont(ofSize: 14, weight: .semibold)]
+            )
+            attr.append(NSAttributedString(string: "  "))
+            let badge = NSAttributedString(
+                string: " OP ",
+                attributes: [
+                    .font: UIFont.systemFont(ofSize: 10, weight: .bold),
+                    .foregroundColor: UIColor.white,
+                    .backgroundColor: UIColor.systemBlue,
+                    .baselineOffset: 1,
+                ]
+            )
+            attr.append(badge)
+            nameLabel.attributedText = attr
+        } else {
+            nameLabel.attributedText = nil
+            nameLabel.text = post.name
+        }
         usernameLabel.text = post.username
         timeLabel.text = Self.formatDate(post.createdAt)
         floorLabel.text = "#\(floorNumber)"
@@ -672,6 +692,7 @@ final class PostNativeCell: UITableViewCell {
         showRepliesButton.isHidden = true
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
+        nameLabel.attributedText = nil
         userTitleLabel.text = nil
         userTitleLabel.isHidden = true
         flairImageView.sd_cancelCurrentImageLoad()

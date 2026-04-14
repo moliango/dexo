@@ -295,6 +295,7 @@ final class ForumOverlayManager {
     // MARK: - Helpers
 
     private func dismissOverlayWindow() {
+        currentContainer?.stopPoller()
         currentContainer = nil
         overlayWindow?.isHidden = true
         overlayWindow?.rootViewController = nil
