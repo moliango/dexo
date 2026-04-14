@@ -60,12 +60,6 @@ enum NativeContentRenderer {
         PollRenderer.self,
     ]
 
-    static func canRenderNatively(_ blocks: [ContentBlock]) -> Bool {
-        blocks.allSatisfy { block in
-            renderers.contains { $0.canRender(block) }
-        }
-    }
-
     static func renderBlocks(
         _ blocks: [ContentBlock],
         config: NativeRenderConfig,

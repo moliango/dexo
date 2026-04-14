@@ -171,7 +171,7 @@ extension RepliesViewController: UITableViewDelegate {
 // MARK: - PostCellDelegate
 
 extension RepliesViewController: PostCellDelegate {
-    func postCell(didTapImageURL url: URL) {
+    func postCell(didTapImageURL url: URL, inPostId postId: Int) {
         let safari = SFSafariViewController(url: url)
         present(safari, animated: true)
     }

@@ -4,8 +4,8 @@ import UIKit
 
 enum DiscourseQuoteRenderer: BlockRenderer {
     static func canRender(_ block: ContentBlock) -> Bool {
-        guard case .discourseQuote(_, _, _, _, _, _, let content) = block else { return false }
-        return NativeContentRenderer.canRenderNatively(content)
+        if case .discourseQuote = block { return true }
+        return false
     }
 
     static func render(_ block: ContentBlock, config: NativeRenderConfig, delegate: PostCellDelegate?) -> UIView {

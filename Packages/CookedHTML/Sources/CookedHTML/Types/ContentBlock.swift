@@ -1,13 +1,11 @@
 import Foundation
 
-/// A single item in a list, which may contain nested sub-lists.
+/// A single item in a list, storing all content blocks in document order.
 public struct ListItem: Sendable, Equatable {
-    public let content: [InlineNode]
-    public let children: [ContentBlock]
+    public let blocks: [ContentBlock]
 
-    public init(content: [InlineNode], children: [ContentBlock] = []) {
-        self.content = content
-        self.children = children
+    public init(blocks: [ContentBlock]) {
+        self.blocks = blocks
     }
 }
 

@@ -109,7 +109,17 @@ final class TappableImageContainer: UIView {
 
     @objc private func imageTapped() {
         guard let imageURL else { return }
-        delegate?.postCell(didTapImageURL: imageURL)
+        let postId = findPostId()
+        delegate?.postCell(didTapImageURL: imageURL, inPostId: postId)
+    }
+
+    private func findPostId() -> Int {
+        var view: UIView? = superview
+        while let v = view {
+            if let cell = v as? PostNativeCell { return cell.postId }
+            view = v.superview
+        }
+        return 0
     }
 
     func cancelImageLoad() {

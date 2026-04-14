@@ -208,10 +208,81 @@ final class IntegrationTests: XCTestCase {
         let blocks = CookedHTMLParser.parse(html: html)
         if case .list(_, let items) = blocks[0] {
             XCTAssertEqual(items.count, 1)
-            XCTAssertFalse(items[0].children.isEmpty, "Expected nested list in children")
+            let nestedBlocks = items[0].blocks.filter { if case .list = $0 { return true }; return false }
+            XCTAssertFalse(nestedBlocks.isEmpty, "Expected nested list in blocks")
         } else {
             XCTFail("Expected list")
         }
+    }
+
+    func testListItemWithNestedULOnly() {
+        // <li> contains only a nested <ul>, no direct text
+        let html = """
+        <ol>
+        <li><ul><li>权限足够大</li></ul></li>
+        <li><ul><li>插件系统大改版之前版本</li></ul></li>
+        </ol>
+        """
+        let blocks = CookedHTMLParser.parse(html: html)
+        guard case .list(let ordered, let items) = blocks[0] else {
+            XCTFail("Expected list"); return
+        }
+        XCTAssertTrue(ordered)
+        XCTAssertEqual(items.count, 2)
+        // Each outer item should have a nested list in blocks
+        guard case .list(_, let innerItems) = items[0].blocks[0] else {
+            XCTFail("Expected nested list in first item"); return
+        }
+        XCTAssertEqual(innerItems.count, 1)
+        if case .paragraph(let inlines) = innerItems[0].blocks[0],
+           case .text(let t) = inlines.first {
+            XCTAssertTrue(t.contains("权限足够大"))
+        } else {
+            XCTFail("Expected text in nested item")
+        }
+    }
+
+    func testListItemMixedContentOrdering() {
+        // <li> with alternating paragraphs and block elements — order must be preserved
+        let html = """
+        <ul>
+        <li><p>text1</p><pre><code>code</code></pre><p>text2</p></li>
+        </ul>
+        """
+        let blocks = CookedHTMLParser.parse(html: html)
+        guard case .list(_, let items) = blocks[0] else {
+            XCTFail("Expected list"); return
+        }
+        let itemBlocks = items[0].blocks
+        XCTAssertEqual(itemBlocks.count, 3, "Expected paragraph + codeBlock + paragraph")
+        if case .paragraph(let i1) = itemBlocks[0], case .text(let t1) = i1.first {
+            XCTAssertTrue(t1.contains("text1"))
+        } else { XCTFail("First block should be paragraph with text1") }
+        if case .codeBlock(_, let code) = itemBlocks[1] {
+            XCTAssertEqual(code, "code")
+        } else { XCTFail("Second block should be codeBlock") }
+        if case .paragraph(let i2) = itemBlocks[2], case .text(let t2) = i2.first {
+            XCTAssertTrue(t2.contains("text2"))
+        } else { XCTFail("Third block should be paragraph with text2") }
+    }
+
+    func testListItemWithLightboxImage() {
+        let html = """
+        <ul>
+        <li><p>某猫养车调试试玩<br><div class="lightbox-wrapper"><a class="lightbox" href="https://example.com/full.jpg"><img src="https://example.com/thumb.jpg" alt="test" width="690" height="488"></a></div></p></li>
+        </ul>
+        """
+        let blocks = CookedHTMLParser.parse(html: html)
+        guard case .list(_, let items) = blocks[0] else {
+            XCTFail("Expected list"); return
+        }
+        let itemBlocks = items[0].blocks
+        // SwiftSoup splits <p> at <div>, so we get: paragraph("某猫养车调试试玩") + image(...)
+        let hasImage = itemBlocks.contains { block in
+            if case .image = block { return true }
+            return false
+        }
+        XCTAssertTrue(hasImage, "Expected image block in list item, got: \(itemBlocks)")
     }
 
     // MARK: - Complex Post

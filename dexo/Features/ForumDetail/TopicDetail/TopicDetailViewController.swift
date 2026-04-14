@@ -1,3 +1,4 @@
+import CookedHTML
 import Lightbox
 import SafariServices
 import SDWebImage
@@ -848,14 +849,26 @@ extension TopicDetailViewController: UITableViewDelegate {
 // MARK: - PostCellDelegate
 
 extension TopicDetailViewController: PostCellDelegate {
-    func postCell(didTapImageURL url: URL) {
-        SDWebImageManager.shared.loadImage(with: url, progress: nil) { [weak self] image, _, _, _, _, _ in
-            guard let self, let image else { return }
-            let controller = LightboxController(images: [LightboxImage(image: image)])
-            controller.dynamicBackground = true
-            controller.modalPresentationStyle = .fullScreen
-            self.present(controller, animated: true)
+    func postCell(didTapImageURL url: URL, inPostId postId: Int) {
+        var imageURLs: [String] = []
+        if let blocks = viewModel.parsedBlocks[postId] {
+            imageURLs = ImageURLCollector.collectImageURLs(from: blocks)
         }
+
+        let tappedString = url.absoluteString
+        let startIndex = imageURLs.firstIndex(of: tappedString) ?? 0
+
+        if imageURLs.isEmpty {
+            imageURLs = [tappedString]
+        }
+
+        let images = imageURLs.compactMap { URL(string: $0) }.map { LightboxImage(imageURL: $0) }
+        guard !images.isEmpty else { return }
+//        LightboxConfig.preload = 2
+        let controller = LightboxController(images: images, startIndex: startIndex)
+        controller.dynamicBackground = true
+        controller.modalPresentationStyle = .fullScreen
+        present(controller, animated: true)
     }
 
     func postCell(didTapLinkURL url: URL) {

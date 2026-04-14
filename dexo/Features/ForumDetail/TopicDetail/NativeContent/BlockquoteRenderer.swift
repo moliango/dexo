@@ -3,8 +3,8 @@ import CookedHTML
 
 enum BlockquoteRenderer: BlockRenderer {
     static func canRender(_ block: ContentBlock) -> Bool {
-        guard case .blockquote(let inner) = block else { return false }
-        return NativeContentRenderer.canRenderNatively(inner)
+        if case .blockquote = block { return true }
+        return false
     }
 
     static func render(_ block: ContentBlock, config: NativeRenderConfig, delegate: PostCellDelegate?) -> UIView {

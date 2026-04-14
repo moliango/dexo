@@ -9,7 +9,7 @@ final class PostNativeCell: UITableViewCell {
     private static let symbolConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
 
     weak var delegate: PostCellDelegate?
-    private var postId: Int = 0
+    private(set) var postId: Int = 0
     private var postLink: String?
     private var currentPost: DiscourseTopicDetail.Post?
     private var validReactions: [String] = []

@@ -3,8 +3,8 @@ import UIKit
 
 enum DetailsRenderer: BlockRenderer {
     static func canRender(_ block: ContentBlock) -> Bool {
-        guard case .details(_, let content) = block else { return false }
-        return NativeContentRenderer.canRenderNatively(content)
+        if case .details = block { return true }
+        return false
     }
 
     static func render(_ block: ContentBlock, config: NativeRenderConfig, delegate: PostCellDelegate?) -> UIView {

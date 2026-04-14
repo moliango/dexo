@@ -1,7 +1,7 @@
 import UIKit
 
 protocol PostCellDelegate: AnyObject {
-    func postCell(didTapImageURL url: URL)
+    func postCell(didTapImageURL url: URL, inPostId postId: Int)
     func postCell(didTapLinkURL url: URL)
     func postCell(didTapShowRepliesForPostId postId: Int)
     func postCell(didTapToggleDetails detailsIndex: Int, postId: Int)

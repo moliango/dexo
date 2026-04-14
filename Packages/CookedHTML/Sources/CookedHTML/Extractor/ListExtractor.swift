@@ -8,44 +8,55 @@ enum ListExtractor {
 
         for child in element.children() {
             guard child.tagName().lowercased() == "li" else { continue }
-            let li = child
-            items.append(extractItem(from: li, options: options))
+            items.append(extractItem(from: child, options: options))
         }
 
         return .list(ordered: ordered, items: items)
     }
 
     private static func extractItem(from li: Element, options: ParseOptions) -> ListItem {
-        var inlineNodes: [InlineNode] = []
-        var childBlocks: [ContentBlock] = []
+        var blocks: [ContentBlock] = []
+        var pendingInlines: [InlineNode] = []
+
+        func flushInlines() {
+            let trimmed = pendingInlines.trimmedWhitespace()
+            if !trimmed.isEmpty {
+                blocks.append(.paragraph(trimmed))
+            }
+            pendingInlines.removeAll()
+        }
 
         for child in li.getChildNodes() {
             if let element = child as? Element {
                 let tag = element.tagName().lowercased()
                 if tag == "ul" {
-                    childBlocks.append(extract(from: element, ordered: false, options: options))
+                    flushInlines()
+                    blocks.append(extract(from: element, ordered: false, options: options))
                 } else if tag == "ol" {
-                    childBlocks.append(extract(from: element, ordered: true, options: options))
+                    flushInlines()
+                    blocks.append(extract(from: element, ordered: true, options: options))
                 } else if tag == "p" {
-                    // Paragraph inside li — extract as inline content
-                    inlineNodes.append(contentsOf: InlineExtractor.extract(from: element, options: options))
+                    flushInlines()
+                    // Use BlockExtractor to handle <p> properly (lightbox splitting, block images, etc.)
+                    blocks.append(contentsOf: BlockExtractor.extractNode(element, options: options))
                 } else {
-                    // Other block elements inside li
-                    let blockLevelTags: Set<String> = ["pre", "blockquote", "table", "div", "details"]
+                    let blockLevelTags: Set<String> = ["pre", "blockquote", "table", "div", "details", "figure", "hr"]
                     if blockLevelTags.contains(tag) {
-                        childBlocks.append(contentsOf: BlockExtractor.extract(from: element, options: options))
+                        flushInlines()
+                        blocks.append(contentsOf: BlockExtractor.extractNode(element, options: options))
                     } else {
-                        inlineNodes.append(contentsOf: InlineExtractor.extract(from: element, options: options, style: []))
+                        pendingInlines.append(contentsOf: InlineExtractor.extract(from: element, options: options, style: []))
                     }
                 }
             } else if let textNode = child as? TextNode {
                 let text = textNode.getWholeText()
                 if !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    inlineNodes.append(.text(text))
+                    pendingInlines.append(.text(text))
                 }
             }
         }
 
-        return ListItem(content: inlineNodes, children: childBlocks)
+        flushInlines()
+        return ListItem(blocks: blocks)
     }
 }

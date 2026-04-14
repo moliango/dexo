@@ -5,6 +5,7 @@
 //  Created by Eilgnaw on 3/21/26.
 //
 
+import Lightbox
 import SDWebImage
 import SDWebImageSVGCoder
 import UIKit
@@ -13,6 +14,14 @@ import UIKit
 class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         SDImageCodersManager.shared.addCoder(SDImageSVGCoder.shared)
+
+        LightboxConfig.loadImage = { imageView, url, completion in
+            imageView.sd_setImage(with: url) { image, _, _, _ in
+                completion?(image)
+            }
+        }
+        LightboxConfig.preload = 2
+
         return true
     }
 

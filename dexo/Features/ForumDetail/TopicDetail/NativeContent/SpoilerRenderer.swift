@@ -3,8 +3,8 @@ import UIKit
 
 enum SpoilerRenderer: BlockRenderer {
     static func canRender(_ block: ContentBlock) -> Bool {
-        guard case .spoiler(let blocks) = block else { return false }
-        return NativeContentRenderer.canRenderNatively(blocks)
+        if case .spoiler = block { return true }
+        return false
     }
 
     static func render(_ block: ContentBlock, config: NativeRenderConfig, delegate: PostCellDelegate?) -> UIView {

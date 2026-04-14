@@ -75,7 +75,7 @@ enum BlockExtractor {
     }
 
     /// Extract content blocks from a single DOM node.
-    private static func extractNode(_ node: Node, options: ParseOptions) -> [ContentBlock] {
+    static func extractNode(_ node: Node, options: ParseOptions) -> [ContentBlock] {
         if let textNode = node as? TextNode {
             let raw = textNode.getWholeText()
             // Trim leading whitespace/newlines but preserve meaningful trailing spaces
@@ -93,7 +93,8 @@ enum BlockExtractor {
             return extractParagraph(from: element, options: options)
 
         case "h1", "h2", "h3", "h4", "h5", "h6":
-            return extractHeading(from: element, level: Int(String(tagName.last!))!, options: options)
+            guard let lastChar = tagName.last, let level = Int(String(lastChar)) else { return [] }
+            return extractHeading(from: element, level: level, options: options)
 
         case "pre":
             return extractCodeBlock(from: element)
@@ -411,7 +412,7 @@ enum BlockExtractor {
         blockTags.contains(element.tagName().lowercased())
     }
 
-    /// Trim whitespace-only paragraphs.
+    /// Trim empty blocks (whitespace-only paragraphs, empty lists).
     private static func trimBlock(_ block: ContentBlock) -> ContentBlock? {
         switch block {
         case .paragraph(let inlines):
@@ -423,6 +424,10 @@ enum BlockExtractor {
                 }
             }
             return trimmed.isEmpty ? nil : .paragraph(trimmed)
+        case .list(_, let items):
+            return items.isEmpty ? nil : block
+        case .blockquote(let blocks):
+            return blocks.isEmpty ? nil : block
         default:
             return block
         }
