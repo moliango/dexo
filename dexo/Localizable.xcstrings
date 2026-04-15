@@ -997,22 +997,6 @@
         }
       }
     },
-    "notifications.mark_all_read" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mark All Read"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "全部已读"
-          }
-        }
-      }
-    },
     "notifications.empty" : {
       "localizations" : {
         "en" : {
@@ -1059,6 +1043,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "登录后查看通知"
+          }
+        }
+      }
+    },
+    "notifications.mark_all_read" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mark All Read"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部已读"
           }
         }
       }
