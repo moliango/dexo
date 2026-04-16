@@ -23,8 +23,6 @@ final class TopicDetailViewModel {
     private(set) var loadedRangeEnd: Int = 0
     /// Cached first post (OP) to preserve across jumpToFloor
     private var firstPost: DiscourseTopicDetail.Post?
-    /// Prevent rapid-fire stream refreshes when already at the end
-    private var lastStreamRefresh: Date = .distantPast
 
     init(api: DiscourseAPI) {
         self.api = api
@@ -88,25 +86,40 @@ final class TopicDetailViewModel {
         return visiblePosts.firstIndex(where: { $0.id == targetId })
     }
 
-    func loadTopic(id: Int, containerWidth: CGFloat) async {
+    /// Loads the topic. When `nearPostNumber > 1` is supplied, the initial batch
+    /// returned by Discourse is centered on that floor — saving a second round-trip
+    /// for deep-link entries (notification tap, reply link, direct URL).
+    /// `jumpTargetFloor` is set so the VC scrolls to the right floor on first layout.
+    func loadTopic(id: Int, containerWidth: CGFloat, nearPostNumber: Int? = nil) async {
         isLoading = true
         isReady = false
         errorMessage = nil
         parsedBlocks = [:]
         postsById = [:]
         do {
-            let detail = try await api.fetchTopic(id: id)
+            let detail = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber)
             topic = detail
 
             // Save the full stream of post IDs
             allPostIds = detail.postStream.stream ?? detail.postStream.posts.map(\.id)
             loadedPostIds = Set(detail.postStream.posts.map(\.id))
 
-            // Cache the first post (OP)
-            firstPost = detail.postStream.posts.first
+            // Cache the first post (OP) — only when the batch actually starts from
+            // post 1. With `near_post_number`, the batch is centered elsewhere and
+            // `posts.first` is not the OP.
+            firstPost = (detail.postStream.posts.first?.postNumber == 1)
+                ? detail.postStream.posts.first
+                : nil
 
-            // Set range tracking
-            loadedRangeStart = 0
+            // Range tracking — derive from the first/last posts actually returned
+            // rather than assuming start = 0. `near_post_number` can return a range
+            // that starts mid-stream.
+            if let firstLoadedId = detail.postStream.posts.first?.id,
+               let firstIndex = allPostIds.firstIndex(of: firstLoadedId) {
+                loadedRangeStart = firstIndex
+            } else {
+                loadedRangeStart = 0
+            }
             if let lastLoadedId = detail.postStream.posts.last?.id,
                let lastIndex = allPostIds.firstIndex(of: lastLoadedId) {
                 loadedRangeEnd = lastIndex + 1
@@ -126,11 +139,14 @@ final class TopicDetailViewModel {
                 parseAndStore(post: post)
             }
 
+            // When we fetched near a specific floor, tell the VC to scroll there.
+            if let nearPostNumber, nearPostNumber > 1 {
+                jumpTargetFloor = nearPostNumber
+            }
+
             isReady = true
         } catch {
-            #if DEBUG
-            print("[TopicDetail] Load failed: \(error)")
-            #endif
+            debugLog("[TopicDetail] Load failed: \(error)")
             errorMessage = error.localizedDescription
         }
 
@@ -138,20 +154,7 @@ final class TopicDetailViewModel {
     }
 
     func loadMorePosts(containerWidth: CGFloat) async {
-        guard !isLoadingMore, let topicId = topic?.id else { return }
-
-        // If we've reached the end, refresh the stream to check for new posts
-        if !canLoadMore {
-            // Throttle: at most once every 10 seconds
-            guard Date.now.timeIntervalSince(lastStreamRefresh) > 10 else { return }
-            isLoadingMore = true
-            await refreshStream(topicId: topicId)
-            if !canLoadMore {
-                isLoadingMore = false
-                return
-            }
-        }
-
+        guard !isLoadingMore, canLoadMore, let topicId = topic?.id else { return }
         isLoadingMore = true
 
         let newEnd = min(loadedRangeEnd + 20, allPostIds.count)
@@ -278,9 +281,7 @@ final class TopicDetailViewModel {
             loadedRangeStart = startIndex
             loadedRangeEnd = endIndex
         } catch {
-            #if DEBUG
-            print("[TopicDetail] Jump failed: \(error)")
-            #endif
+            debugLog("[TopicDetail] Jump failed: \(error)")
             errorMessage = error.localizedDescription
             jumpTargetFloor = nil
         }
@@ -340,20 +341,6 @@ final class TopicDetailViewModel {
     }
 
     // MARK: - Private
-
-    /// Re-fetch the topic to pick up any new post IDs appended to the stream.
-    private func refreshStream(topicId: Int) async {
-        lastStreamRefresh = .now
-        do {
-            let detail = try await api.fetchTopic(id: topicId)
-            let freshStream = detail.postStream.stream ?? detail.postStream.posts.map(\.id)
-            if freshStream.count > allPostIds.count {
-                allPostIds = freshStream
-            }
-        } catch {
-            // Silently fail; canLoadMore will remain false
-        }
-    }
 
     private func parseAndStore(post: DiscourseTopicDetail.Post) {
         let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: api.baseURL)

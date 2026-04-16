@@ -79,7 +79,7 @@ final class AuthManager: @unchecked Sendable {
             throw AuthError.invalidURL
         }
 
-        print("[AuthManager] Auth URL: \(authURL.absoluteString)")
+        debugLog("[AuthManager] Auth URL: \(authURL.absoluteString)")
 
         // 4. Launch browser auth session
         let callbackURL: URL
@@ -114,38 +114,38 @@ final class AuthManager: @unchecked Sendable {
         }
 
         // 5. Extract payload from callback URL
-        print("[AuthManager] Callback URL: \(callbackURL.absoluteString)")
+        debugLog("[AuthManager] Callback URL: \(callbackURL.absoluteString)")
         guard let components = URLComponents(url: callbackURL, resolvingAgainstBaseURL: false),
               let payload = components.queryItems?.first(where: { $0.name == "payload" })?.value
         else {
-            print("[AuthManager] ERROR: Missing payload in callback URL")
+            debugLog("[AuthManager] ERROR: Missing payload in callback URL")
             KeychainHelper.deleteRSAKeyPair(for: baseURL)
             throw AuthError.missingPayload
         }
 
-        print("[AuthManager] Payload length: \(payload.count)")
+        debugLog("[AuthManager] Payload length: \(payload.count)")
 
         // 6. Decrypt payload
         let authPayload: RSACrypto.AuthPayload
         do {
             authPayload = try RSACrypto.decryptPayload(payload, with: privateKey)
         } catch {
-            print("[AuthManager] ERROR: Decryption failed: \(error)")
+            debugLog("[AuthManager] ERROR: Decryption failed: \(error)")
             KeychainHelper.deleteRSAKeyPair(for: baseURL)
             throw AuthError.decryptionFailed(error)
         }
 
-        print("[AuthManager] Decrypted nonce: \(authPayload.nonce)")
-        print("[AuthManager] Expected nonce: \(nonce)")
+        debugLog("[AuthManager] Decrypted nonce: \(authPayload.nonce)")
+        debugLog("[AuthManager] Expected nonce: \(nonce)")
 
         // 7. Verify nonce
         guard authPayload.nonce == nonce else {
-            print("[AuthManager] ERROR: Nonce mismatch")
+            debugLog("[AuthManager] ERROR: Nonce mismatch")
             KeychainHelper.deleteRSAKeyPair(for: baseURL)
             throw AuthError.nonceMismatch
         }
 
-        print("[AuthManager] Auth success! Key length: \(authPayload.key.count)")
+        debugLog("[AuthManager] Auth success! Key length: \(authPayload.key.count)")
 
         // 8. Store API key in Keychain
         do {

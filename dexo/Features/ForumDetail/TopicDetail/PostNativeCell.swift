@@ -498,10 +498,16 @@ final class PostNativeCell: UITableViewCell {
             }
             let t2 = CACurrentMediaTime()
 
+            var allTextViews: [UITextView] = []
             for view in views {
-                setupTextViews(in: view)
+                collectTextViews(in: view, into: &allTextViews)
                 contentStackView.addArrangedSubview(view)
             }
+            for tv in allTextViews {
+                tv.delegate = self
+                (tv as? LinkTextView)?.configureSpoilerIfNeeded()
+            }
+            loadInlineImagesBatched(in: allTextViews)
             let t3 = CACurrentMediaTime()
             renderedContentPostId = post.id
             FrameDropDetector.shared.log("render post#\(post.id): teardown=\(String(format: "%.1f", (t1-t0)*1000))ms renderBlocks=\(String(format: "%.1f", (t2-t1)*1000))ms addViews=\(String(format: "%.1f", (t3-t2)*1000))ms total=\(String(format: "%.1f", (t3-t0)*1000))ms")
@@ -578,53 +584,62 @@ final class PostNativeCell: UITableViewCell {
 
     // MARK: - View Setup
 
-    private func setupTextViews(in view: UIView) {
-        if let textView = view as? LinkTextView {
-            textView.delegate = self
-            textView.configureSpoilerIfNeeded()
-            loadInlineImages(in: textView)
-            return
-        }
-        if let textView = view as? UITextView {
-            textView.delegate = self
-            loadInlineImages(in: textView)
+    /// Recursively collect all UITextViews under `view` without doing any setup work.
+    private func collectTextViews(in view: UIView, into out: inout [UITextView]) {
+        if let tv = view as? UITextView {
+            out.append(tv)
             return
         }
         for subview in view.subviews {
-            setupTextViews(in: subview)
+            collectTextViews(in: subview, into: &out)
         }
     }
 
     // MARK: - Inline Image Loading
 
-    private func loadInlineImages(in textView: UITextView) {
-        guard let attrText = textView.attributedText else { return }
-        let full = NSRange(location: 0, length: attrText.length)
+    private final class InlineImageEntry {
+        let attachment: NSTextAttachment
+        let location: Int
+        weak var textView: UITextView?
+        init(attachment: NSTextAttachment, location: Int, textView: UITextView) {
+            self.attachment = attachment
+            self.location = location
+            self.textView = textView
+        }
+    }
 
-        // Collect all (attachment, location, url, isEmoji) first — enumerateAttribute merges
-        // adjacent characters that share the same URL into one range, so we must
-        // iterate character-by-character inside each range.
-        var entries: [(attachment: NSTextAttachment, location: Int, url: URL, isEmoji: Bool)] = []
-        attrText.enumerateAttribute(.cookedHTMLImageURL, in: full) { value, range, _ in
-            guard let urlString = value as? String,
-                  let url = URL(string: urlString) else { return }
-            for i in 0 ..< range.length {
-                let loc = range.location + i
-                if let attachment = attrText.attribute(.attachment, at: loc, effectiveRange: nil) as? NSTextAttachment {
-                    // Emoji attachments have small bounds (≤ lineHeight); non-emoji have larger bounds
-                    let isEmoji = attachment.bounds.width <= 24 && attachment.bounds.height <= 24
-                    entries.append((attachment, loc, url, isEmoji))
+    /// Batch inline-image loading across every textView in the post, deduped by URL.
+    /// A post with N identical emoji URLs collapses from N SDWebImage calls to 1.
+    private func loadInlineImagesBatched(in textViews: [UITextView]) {
+        var byURL: [URL: [InlineImageEntry]] = [:]
+        for textView in textViews {
+            guard let attrText = textView.attributedText else { continue }
+            let full = NSRange(location: 0, length: attrText.length)
+            attrText.enumerateAttribute(.cookedHTMLImageURL, in: full) { value, range, _ in
+                guard let urlString = value as? String,
+                      let url = URL(string: urlString) else { return }
+                // enumerateAttribute merges adjacent same-URL chars into one range —
+                // iterate char-by-char so each attachment gets its own entry.
+                for i in 0 ..< range.length {
+                    let loc = range.location + i
+                    if let attachment = attrText.attribute(.attachment, at: loc, effectiveRange: nil) as? NSTextAttachment {
+                        byURL[url, default: []].append(InlineImageEntry(attachment: attachment, location: loc, textView: textView))
+                    }
                 }
             }
         }
 
-        for entry in entries {
-            SDWebImageManager.shared.loadImage(with: entry.url, progress: nil) { [weak textView] image, _, _, _, _, _ in
-                guard let textView, let image else { return }
-                entry.attachment.image = image
-                // Keep the bounds already set by the attributed string builder
-                let charRange = NSRange(location: entry.location, length: 1)
-                textView.textStorage.edited(.editedAttributes, range: charRange, changeInLength: 0)
+        for (url, entries) in byURL {
+            SDWebImageManager.shared.loadImage(with: url, progress: nil) { image, _, _, _, _, _ in
+                guard let image else { return }
+                for entry in entries {
+                    entry.attachment.image = image
+                    if let tv = entry.textView {
+                        // Keep the bounds already set by the attributed string builder
+                        let charRange = NSRange(location: entry.location, length: 1)
+                        tv.textStorage.edited(.editedAttributes, range: charRange, changeInLength: 0)
+                    }
+                }
             }
         }
     }

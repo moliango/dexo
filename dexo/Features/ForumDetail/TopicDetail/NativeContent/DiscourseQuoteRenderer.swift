@@ -51,7 +51,10 @@ enum DiscourseQuoteRenderer: BlockRenderer {
             titleButton.titleLabel?.lineBreakMode = .byTruncatingTail
             titleButton.setTitleColor(.link, for: .normal)
             titleButton.contentHorizontalAlignment = .leading
-            titleButton.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            // Hug tight (high) so a short title doesn't stretch the button and push
+            // the category badge to the far right. Low compression resistance still
+            // lets long titles shrink + tail-truncate when the stack can't fit them.
+            titleButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             if let topicURL, let url = URL(string: topicURL) {
                 titleButton.addAction(UIAction { _ in
@@ -118,7 +121,11 @@ enum DiscourseQuoteRenderer: BlockRenderer {
 
             headerStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
             headerStack.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: 10),
-            { let c = headerStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12); c.priority = .init(999); return c }(),
+            // `lessThanOrEqualTo` so the stack hugs to its natural content width when
+            // the title is short — title+badge sit next to each other at the leading
+            // side with any extra space left blank, instead of the button stretching
+            // and pushing the badge to the trailing edge.
+            { let c = headerStack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -12); c.priority = .init(999); return c }(),
 
             contentStack.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 8),
             contentStack.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: 10),

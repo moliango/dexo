@@ -38,14 +38,15 @@ enum ListRenderer: BlockRenderer {
         return stack
     }
 
-    /// Renders all flat items as a single UITextView — O(1) views instead of O(n).
+    /// Renders all flat items as a single view — O(1) views instead of O(n).
     private static func renderCombinedFlatList(
         _ items: [ListItem],
         ordered: Bool,
         indent: CGFloat,
         config: NativeRenderConfig
-    ) -> LinkTextView {
+    ) -> UIView {
         let combined = NSMutableAttributedString()
+        var interactive = false
         for (index, item) in items.enumerated() {
             if index > 0 { combined.append(NSAttributedString(string: "\n")) }
 
@@ -56,6 +57,9 @@ enum ListRenderer: BlockRenderer {
                     allInlines.append(contentsOf: inlines)
                 }
             }
+            if !interactive, NativeContentRenderer.inlinesNeedTextView(allInlines) {
+                interactive = true
+            }
             combined.append(makeBulletedAttributedString(
                 inlines: allInlines,
                 ordered: ordered,
@@ -64,7 +68,7 @@ enum ListRenderer: BlockRenderer {
                 config: config
             ))
         }
-        return makeTextView(attributedText: combined, config: config)
+        return makeLineView(attributedText: combined, interactive: interactive, config: config)
     }
 
     private static func renderItem(
@@ -99,7 +103,8 @@ enum ListRenderer: BlockRenderer {
                     indent: indent,
                     config: config
                 )
-                itemStack.addArrangedSubview(makeTextView(attributedText: result, config: config))
+                let interactive = NativeContentRenderer.inlinesNeedTextView(inlines)
+                itemStack.addArrangedSubview(makeLineView(attributedText: result, interactive: interactive, config: config))
             } else {
                 if isFirstBlock {
                     // First block is not a paragraph — show standalone bullet
@@ -111,7 +116,7 @@ enum ListRenderer: BlockRenderer {
                         indent: indent,
                         config: config
                     )
-                    itemStack.addArrangedSubview(makeTextView(attributedText: bulletOnly, config: config))
+                    itemStack.addArrangedSubview(makeLineView(attributedText: bulletOnly, interactive: false, config: config))
                 }
 
                 // Render child block with indentation
@@ -150,7 +155,7 @@ enum ListRenderer: BlockRenderer {
                 indent: indent,
                 config: config
             )
-            itemStack.addArrangedSubview(makeTextView(attributedText: bulletOnly, config: config))
+            itemStack.addArrangedSubview(makeLineView(attributedText: bulletOnly, interactive: false, config: config))
         }
 
         return itemStack
@@ -186,7 +191,8 @@ enum ListRenderer: BlockRenderer {
             indent: indent,
             config: config
         )
-        return makeTextView(attributedText: result, config: config)
+        let interactive = NativeContentRenderer.inlinesNeedTextView(allInlines)
+        return makeLineView(attributedText: result, interactive: interactive, config: config)
     }
 
     // MARK: - Helpers
@@ -240,5 +246,19 @@ enum ListRenderer: BlockRenderer {
         ]
         textView.translatesAutoresizingMaskIntoConstraints = false
         return textView
+    }
+
+    /// Cheap UILabel when the line is non-interactive; LinkTextView otherwise.
+    /// A flat list of N pure-text items collapses to N UILabels (or 1 UILabel via
+    /// renderCombinedFlatList), avoiding N expensive UITextView instantiations.
+    private static func makeLineView(
+        attributedText: NSAttributedString,
+        interactive: Bool,
+        config: NativeRenderConfig
+    ) -> UIView {
+        if interactive {
+            return makeTextView(attributedText: attributedText, config: config)
+        }
+        return NativeContentRenderer.makeContentLabel(attributedText: attributedText)
     }
 }

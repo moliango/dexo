@@ -31,6 +31,14 @@ enum HeadingRenderer: BlockRenderer {
             baseURL: config.baseURL
         )
 
+        let attr = inlines.attributedString(config: headingConfig.attributedStringConfig)
+
+        // Fast path: pure-text headings (the common case) → UILabel is ~5–10× cheaper
+        // to instantiate than UITextView.
+        if !NativeContentRenderer.inlinesNeedTextView(inlines) {
+            return NativeContentRenderer.makeContentLabel(attributedText: attr)
+        }
+
         let textView = LinkTextView()
         textView.isEditable = false
         textView.isScrollEnabled = false
@@ -38,7 +46,7 @@ enum HeadingRenderer: BlockRenderer {
         textView.textContainer.lineFragmentPadding = 0
         textView.backgroundColor = .clear
         textView.dataDetectorTypes = []
-        textView.attributedText = inlines.attributedString(config: headingConfig.attributedStringConfig)
+        textView.attributedText = attr
         textView.linkTextAttributes = [
             .foregroundColor: config.linkColor,
         ]

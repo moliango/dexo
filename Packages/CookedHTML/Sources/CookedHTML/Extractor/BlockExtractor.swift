@@ -51,12 +51,21 @@ enum BlockExtractor {
                 continue
             }
             let prev = result[lastIndex]
-            // Case 1: small image → inline emoji in preceding paragraph
+            // Case 1: small image → inline emoji at end of preceding paragraph
             if case .image(let src, let alt, let w, let h, _) = annotated.block,
                let w, let h, w <= 80, h <= 80,
                case .paragraph(let inlines) = prev.block
             {
                 let merged = ContentBlock.paragraph(inlines + [.image(src: src, alt: alt, width: w, height: h, isEmoji: true)])
+                result[lastIndex] = AnnotatedBlock(block: merged, sourceHTML: prev.sourceHTML + annotated.sourceHTML)
+                continue
+            }
+            // Case 1b: paragraph following a small image → fold the image in as leading inline
+            if case .paragraph(let newInlines) = annotated.block,
+               case .image(let src, let alt, let w, let h, _) = prev.block,
+               let w, let h, w <= 80, h <= 80
+            {
+                let merged = ContentBlock.paragraph([.image(src: src, alt: alt, width: w, height: h, isEmoji: true)] + newInlines)
                 result[lastIndex] = AnnotatedBlock(block: merged, sourceHTML: prev.sourceHTML + annotated.sourceHTML)
                 continue
             }
@@ -413,16 +422,26 @@ enum BlockExtractor {
     }
 
     /// Trim empty blocks (whitespace-only paragraphs, empty lists).
+    ///
+    /// Handles three kinds of "visually blank" paragraphs the extractor can emit:
+    /// 1. Paragraphs made up entirely of whitespace-only text/styled-text nodes.
+    /// 2. Paragraphs containing only `.lineBreak`s (e.g. from `<p><br></p>` or
+    ///    chains of `<br>` between real content — common in quote excerpts).
+    /// 3. Leading/trailing `.lineBreak`s that would render as empty lines above or
+    ///    below the real text. Interior line breaks are preserved since they
+    ///    represent intentional soft breaks within a single paragraph.
     private static func trimBlock(_ block: ContentBlock) -> ContentBlock? {
         switch block {
         case .paragraph(let inlines):
-            let trimmed = inlines.filter { node in
+            var trimmed = inlines.filter { node in
                 switch node {
                 case .text(let t): return !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 case .styledText(let t, _): return !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 default: return true
                 }
             }
+            while case .lineBreak = trimmed.first { trimmed.removeFirst() }
+            while case .lineBreak = trimmed.last { trimmed.removeLast() }
             return trimmed.isEmpty ? nil : .paragraph(trimmed)
         case .list(_, let items):
             return items.isEmpty ? nil : block
@@ -434,8 +453,11 @@ enum BlockExtractor {
     }
 
     /// Merge blocks that result from SwiftSoup splitting inline content into separate top-level nodes.
-    /// Handles two cases:
-    /// 1. Small (emoji-sized) `.image` blocks following a `.paragraph` → merged as inline image.
+    /// Handles three cases:
+    /// 1. Small (emoji-sized) `.image` blocks following a `.paragraph` → merged as trailing inline.
+    /// 1b. `.paragraph` following a small (emoji-sized) `.image` block → small image folded as leading inline.
+    ///     This catches e.g. a table cell like `<td><img class="emoji"> text</td>` whose children are parsed
+    ///     as two siblings; without this case the small image would stay as a block and get rescaled up.
     /// 2. Consecutive `.paragraph` blocks that are bare siblings (no intervening block) → merged.
     private static func mergeInlineImageBlocks(_ blocks: [ContentBlock]) -> [ContentBlock] {
         guard blocks.count > 1 else { return blocks }
@@ -445,12 +467,20 @@ enum BlockExtractor {
                 result.append(block)
                 continue
             }
-            // Case 1: small image following a paragraph → inline emoji
+            // Case 1: small image following a paragraph → inline emoji at end
             if case .image(let src, let alt, let w, let h, _) = block,
                let w, let h, w <= 80, h <= 80,
                case .paragraph(let inlines) = result[lastIndex]
             {
                 result[lastIndex] = .paragraph(inlines + [.image(src: src, alt: alt, width: w, height: h, isEmoji: true)])
+                continue
+            }
+            // Case 1b: paragraph following a small image → fold the image in as leading inline
+            if case .paragraph(let newInlines) = block,
+               case .image(let src, let alt, let w, let h, _) = result[lastIndex],
+               let w, let h, w <= 80, h <= 80
+            {
+                result[lastIndex] = .paragraph([.image(src: src, alt: alt, width: w, height: h, isEmoji: true)] + newInlines)
                 continue
             }
             // Case 2: bare text/inline paragraph following a paragraph that ends with an inline image

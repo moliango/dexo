@@ -12,6 +12,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         ThemeManager.shared.apply(to: window)
         window.makeKeyAndVisible()
         self.window = window
+
+        #if DEBUG
+        FPSOverlay.shared.install(on: windowScene)
+        #endif
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {}

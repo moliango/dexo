@@ -70,8 +70,8 @@ final class DiscourseAPI {
         try await request(route: .privateMessages(username: username))
     }
 
-    func fetchTopic(id: Int) async throws -> DiscourseTopicDetail {
-        try await request(route: .topic(id: id))
+    func fetchTopic(id: Int, nearPostNumber: Int? = nil) async throws -> DiscourseTopicDetail {
+        try await request(route: .topic(id: id, nearPostNumber: nearPostNumber))
     }
 
     func fetchTopicPosts(topicId: Int, postIds: [Int]) async throws -> DiscourseTopicPostsResponse {
@@ -356,7 +356,7 @@ final class DiscourseAPI {
             .response
 
         if let data = response.data, let body = String(data: data, encoding: .utf8) {
-            debugLog("[DiscourseAPI] \(route.method.rawValue) \(url)\n\(body)")
+//            debugLog("[DiscourseAPI] \(route.method.rawValue) \(url)\n\(body)")
         }
 
         if let newToken = response.response?.value(forHTTPHeaderField: "X-CSRF-Token") {

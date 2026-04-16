@@ -44,9 +44,9 @@ final class FrameDropDetector {
         // 60fps = 16.6ms per frame; flag anything over 25ms (~1.5 frames)
         if elapsed > 25 {
             let dropped = Int(elapsed / 16.6) - 1
-            print("🔴 [PERF] FRAME DROP: \(String(format: "%.1f", elapsed))ms (~\(dropped) frames dropped)")
+            debugLog("🔴 [PERF] FRAME DROP: \(String(format: "%.1f", elapsed))ms (~\(dropped) frames dropped)")
             for msg in pendingLogs {
-                print("   ↳ \(msg)")
+                debugLog("   ↳ \(msg)")
             }
         }
     }
@@ -80,6 +80,7 @@ final class TopicDetailViewController: ObservableViewController {
         tv.register(BoostCell.self, forCellReuseIdentifier: BoostCell.reuseIdentifier)
         tv.delegate = self
         tv.separatorStyle = .none
+        tv.showsVerticalScrollIndicator = false
         tv.isHidden = true
         return tv
     }()
@@ -294,12 +295,16 @@ final class TopicDetailViewController: ObservableViewController {
         ])
 
         Task {
-            await viewModel.loadTopic(id: topicId, containerWidth: view.bounds.width)
-            if let floor = initialFloor, floor > 1 {
+            // Deep-link entries (initialFloor > 1) pass the floor straight through
+            // to `loadTopic` so Discourse's `near_post_number` param can return posts
+            // centered on the target in one request — no separate jumpToFloor round
+            // trip, no parsing the OP batch just to discard it.
+            let near = (initialFloor ?? 0) > 1 ? initialFloor : nil
+            if near != nil {
                 initialFloor = nil
                 suppressLoadEarlier = true
-                await viewModel.jumpToFloor(floor, containerWidth: view.bounds.width)
             }
+            await viewModel.loadTopic(id: topicId, containerWidth: view.bounds.width, nearPostNumber: near)
         }
         Task {
             await api.loadOrFetchEmojiMap()

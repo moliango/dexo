@@ -74,6 +74,7 @@ final class CategoryTopicsViewController: ObservableViewController {
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(TopicCell.self, forCellReuseIdentifier: TopicCell.reuseIdentifier)
         tv.delegate = self
+        tv.showsVerticalScrollIndicator = false
         return tv
     }()
 

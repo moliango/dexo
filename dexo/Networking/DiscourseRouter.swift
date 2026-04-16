@@ -6,7 +6,7 @@ enum DiscourseRouter {
     case hotTopics(page: Int)
     case topTopics(page: Int)
     case categories
-    case topic(id: Int)
+    case topic(id: Int, nearPostNumber: Int? = nil)
     case topicPosts(topicId: Int, postIds: [Int])
     case notifications
     case privateMessages(username: String)
@@ -59,7 +59,13 @@ enum DiscourseRouter {
             return "/top.json?page=\(page)"
         case .categories:
             return "/categories.json?include_subcategories=true"
-        case .topic(let id):
+        case .topic(let id, let nearPostNumber):
+            // `near_post_number=N` asks Discourse to return the first batch of posts
+            // centered on floor N instead of starting from post 1. Used for deep-link
+            // entry so we avoid fetching + parsing the OP batch just to throw it away.
+            if let nearPostNumber, nearPostNumber > 1 {
+                return "/t/\(id).json?near_post_number=\(nearPostNumber)"
+            }
             return "/t/\(id).json"
         case .topicPosts(let topicId, let postIds):
             let ids = postIds.map { "post_ids[]=\($0)" }.joined(separator: "&")

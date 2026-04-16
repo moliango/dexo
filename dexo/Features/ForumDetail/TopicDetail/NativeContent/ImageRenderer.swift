@@ -9,13 +9,11 @@ final class TappableImageContainer: UIView {
     var imageURL: URL?
     weak var delegate: PostCellDelegate?
 
-    private let imageView: SDAnimatedImageView = {
-        let iv = SDAnimatedImageView()
-        iv.contentMode = .scaleAspectFill
-        iv.clipsToBounds = true
-        iv.translatesAutoresizingMaskIntoConstraints = false
-        return iv
-    }()
+    /// The actual image view. `SDAnimatedImageView` only for formats that can animate
+    /// (GIF); for static JPEG/PNG/WebP we use plain `UIImageView`, which is several
+    /// times cheaper to instantiate (no animation state, no frame timer, no
+    /// `SDAnimatedImageProvider` plumbing).
+    private let imageView: UIImageView
 
     private var imageHeightConstraint: NSLayoutConstraint!
     private var imageWidthConstraint: NSLayoutConstraint!
@@ -24,8 +22,17 @@ final class TappableImageContainer: UIView {
     /// Images narrower than this are displayed proportionally smaller on screen.
     private static let referenceWidth: CGFloat = 690
 
+    private static func isLikelyAnimated(_ url: URL) -> Bool {
+        url.pathExtension.lowercased() == "gif"
+    }
+
     init(url: URL, width: Int?, height: Int?, containerWidth: CGFloat, href: URL? = nil) {
         imageURL = href ?? url
+        let iv: UIImageView = Self.isLikelyAnimated(url) ? SDAnimatedImageView() : UIImageView()
+        iv.contentMode = .scaleAspectFill
+        iv.clipsToBounds = true
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        imageView = iv
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -70,7 +77,7 @@ final class TappableImageContainer: UIView {
         imageView.clipsToBounds = true
 
         // Pause GIF animation by default; resumed when visible on screen
-        imageView.autoPlayAnimatedImage = false
+        (imageView as? SDAnimatedImageView)?.autoPlayAnimatedImage = false
 
         let hasOriginalSize = width != nil && height != nil
 

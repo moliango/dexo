@@ -34,13 +34,43 @@ enum TableRenderer: BlockRenderer {
             isHeaderRow.append(false)
         }
 
+        // Pre-build attributed strings for simple (single-paragraph) cells so width
+        // measurement and text rendering share the same NSAttributedString. This
+        // avoids building+laying out the same attributed text twice per cell.
+        let plainAttrConfig = config.attributedStringConfig
+        let boldAttrConfig = AttributedStringConfig(
+            baseFont: config.baseFont.withTraits(.traitBold),
+            baseColor: config.baseColor,
+            linkColor: config.linkColor,
+            codeFont: config.codeFont,
+            codeBackgroundColor: config.codeBackgroundColor
+        )
+
         var columnMaxWidths: [CGFloat] = Array(repeating: 0, count: columnCount)
-        for row in allRows {
+        var cellAttrStrings: [[(attr: NSAttributedString, needsTextView: Bool)?]] = []
+        for (rowIdx, row) in allRows.enumerated() {
+            let isHeader = isHeaderRow[rowIdx]
+            let attrCfg = isHeader ? boldAttrConfig : plainAttrConfig
+            var rowAttrs: [(attr: NSAttributedString, needsTextView: Bool)?] = []
             for col in 0..<columnCount {
                 let cellBlocks = col < row.count ? row[col] : []
-                let naturalWidth = estimateNaturalWidth(of: cellBlocks, config: config) + cellPaddingH * 2
-                columnMaxWidths[col] = max(columnMaxWidths[col], naturalWidth)
+                let naturalWidth: CGFloat
+                var prebuilt: (attr: NSAttributedString, needsTextView: Bool)?
+                if cellBlocks.count == 1, case .paragraph(let inlines) = cellBlocks[0] {
+                    let attr = inlines.attributedString(config: attrCfg)
+                    prebuilt = (attr, NativeContentRenderer.inlinesNeedTextView(inlines))
+                    naturalWidth = ceil(attr.boundingRect(
+                        with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude),
+                        options: [.usesLineFragmentOrigin],
+                        context: nil
+                    ).width)
+                } else {
+                    naturalWidth = estimateNaturalWidth(of: cellBlocks, config: config)
+                }
+                rowAttrs.append(prebuilt)
+                columnMaxWidths[col] = max(columnMaxWidths[col], naturalWidth + cellPaddingH * 2)
             }
+            cellAttrStrings.append(rowAttrs)
         }
 
         // MARK: - Water-filling column width allocation
@@ -86,7 +116,29 @@ enum TableRenderer: BlockRenderer {
 
         // MARK: - Cell factory
 
-        func makeCellView(blocks: [ContentBlock], columnWidth: CGFloat, bold: Bool) -> UIView {
+        func makeCellView(
+            blocks: [ContentBlock],
+            prebuilt: (attr: NSAttributedString, needsTextView: Bool)?,
+            columnWidth: CGFloat,
+            bold: Bool
+        ) -> UIView {
+            // Fast path: single-paragraph cell with an already-built attributed string.
+            // When the cell has no link / mention / hashtag / spoiler, return a cheap
+            // PaddedContentLabel (UILabel ~5–10× cheaper to instantiate than UITextView).
+            // Inline emoji attachments are fine — PostNativeCell.loadInlineImagesBatched
+            // refreshes the label by re-assigning its attributedText.
+            if let pre = prebuilt {
+                if pre.needsTextView {
+                    let textView = ParagraphRenderer.makeTextView(attributedText: pre.attr, config: config)
+                    textView.textContainerInset = UIEdgeInsets(top: cellPaddingV, left: cellPaddingH, bottom: cellPaddingV, right: cellPaddingH)
+                    return textView
+                }
+                return NativeContentRenderer.makeContentLabel(
+                    attributedText: pre.attr,
+                    insets: UIEdgeInsets(top: cellPaddingV, left: cellPaddingH, bottom: cellPaddingV, right: cellPaddingH)
+                )
+            }
+
             let container = UIView()
             container.translatesAutoresizingMaskIntoConstraints = false
 
@@ -145,7 +197,8 @@ enum TableRenderer: BlockRenderer {
 
             let cells: [UIView] = (0..<columnCount).map { col in
                 let cellBlocks = col < row.count ? row[col] : []
-                return makeCellView(blocks: cellBlocks, columnWidth: columnWidthsPx[col], bold: bold)
+                let prebuilt = cellAttrStrings[rowIndex][col]
+                return makeCellView(blocks: cellBlocks, prebuilt: prebuilt, columnWidth: columnWidthsPx[col], bold: bold)
             }
 
             let rowView = UIView()
