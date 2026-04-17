@@ -7,6 +7,7 @@ class ObservableViewController: BaseViewController {
 
     func startObserving() {
         withObservationTracking {
+            debugLog("self.updateUI()")
             self.updateUI()
         } onChange: { [weak self] in
             // Use .common run-loop mode so the re-observation fires during UIScrollView

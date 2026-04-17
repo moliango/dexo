@@ -4,11 +4,14 @@ import UIKit
 final class SearchResultCell: UITableViewCell {
     static let reuseIdentifier = "SearchResultCell"
 
+    private static let baseAvatarSize: CGFloat = 36
+    private var avatarWidthConstraint: NSLayoutConstraint!
+    private var avatarHeightConstraint: NSLayoutConstraint!
+
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.layer.cornerRadius = 18
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -16,7 +19,7 @@ final class SearchResultCell: UITableViewCell {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = FontManager.shared.font(size: 16, weight: .medium)
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -31,7 +34,7 @@ final class SearchResultCell: UITableViewCell {
 
     private let usernameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -59,11 +62,14 @@ final class SearchResultCell: UITableViewCell {
         bottomToBlurb = blurbLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10)
         bottomToUsername = titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10)
 
+        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+
         NSLayoutConstraint.activate([
             avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
-            avatarImageView.widthAnchor.constraint(equalToConstant: 36),
-            avatarImageView.heightAnchor.constraint(equalToConstant: 36),
+            avatarWidthConstraint,
+            avatarHeightConstraint,
 
             usernameLabel.topAnchor.constraint(equalTo: avatarImageView.topAnchor),
             usernameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 10),
@@ -79,6 +85,11 @@ final class SearchResultCell: UITableViewCell {
     }
 
     func configure(with post: DiscourseSearchResult.SearchPost, topicTitle: String?, assetBaseURL: String) {
+        let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
+        avatarWidthConstraint.constant = avatarSize
+        avatarHeightConstraint.constant = avatarSize
+        avatarImageView.layer.cornerRadius = avatarSize / 2
+
         // Use topic title when available, fall back to headline
         if let topicTitle, !topicTitle.isEmpty {
             titleLabel.attributedText = nil
@@ -86,8 +97,8 @@ final class SearchResultCell: UITableViewCell {
         } else if let headline = post.topicTitleHeadline {
             titleLabel.attributedText = Self.highlightedString(
                 html: headline,
-                baseFont: .systemFont(ofSize: 16, weight: .medium),
-                highlightFont: .systemFont(ofSize: 16, weight: .bold),
+                baseFont: FontManager.shared.font(size: 16, weight: .medium),
+                highlightFont: FontManager.shared.font(size: 16, weight: .bold),
                 baseColor: .label
             )
         } else {
@@ -102,8 +113,8 @@ final class SearchResultCell: UITableViewCell {
         if hasBlurb {
             blurbLabel.attributedText = Self.highlightedString(
                 html: post.blurb!,
-                baseFont: .systemFont(ofSize: 14),
-                highlightFont: .systemFont(ofSize: 14, weight: .semibold),
+                baseFont: FontManager.shared.font(size: 14),
+                highlightFont: FontManager.shared.font(size: 14, weight: .semibold),
                 baseColor: .secondaryLabel
             )
             blurbLabel.isHidden = false

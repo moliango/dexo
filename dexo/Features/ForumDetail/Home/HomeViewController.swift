@@ -21,7 +21,7 @@ final class HomeViewController: ObservableViewController {
         config.imagePadding = 6
         config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
             var a = attrs
-            a.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+            a.font = FontManager.shared.font(size: 15, weight: .medium)
             return a
         }
         let button = UIButton(configuration: config)

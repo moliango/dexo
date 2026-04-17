@@ -37,7 +37,7 @@ final class AddForumViewController: ObservableViewController {
     private let errorLabel: UILabel = {
         let label = UILabel()
         label.textColor = .systemRed
-        label.font = .systemFont(ofSize: 14)
+        label.font = FontManager.shared.font(size: 14)
         label.numberOfLines = 0
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false

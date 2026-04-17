@@ -115,6 +115,39 @@ final class AppSettings {
         customThemeSchemes = schemes
     }
 
+    // MARK: - Font Size
+
+    /// Whether to follow the system Dynamic Type setting.
+    var followSystemFontSize: Bool {
+        get {
+            // Default to true if key has never been set
+            if defaults.object(forKey: "followSystemFontSize") == nil { return true }
+            return defaults.bool(forKey: "followSystemFontSize")
+        }
+        set { defaults.set(newValue, forKey: "followSystemFontSize") }
+    }
+
+    /// Font size level: -3 … +4, where 0 is the default.
+    var fontSizeLevel: Int {
+        get { defaults.integer(forKey: "fontSizeLevel") }
+        set { defaults.set(newValue, forKey: "fontSizeLevel") }
+    }
+
+    /// Scale factor derived from the app-level font size setting.
+    var appFontScale: CGFloat {
+        switch fontSizeLevel {
+        case -3: return 0.82
+        case -2: return 0.88
+        case -1: return 0.94
+        case  0: return 1.0
+        case  1: return 1.08
+        case  2: return 1.16
+        case  3: return 1.25
+        case  4: return 1.35
+        default: return 1.0
+        }
+    }
+
     // MARK: - Boost Display
 
     enum BoostDisplayMode: Int, CaseIterable {

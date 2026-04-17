@@ -22,7 +22,7 @@ enum HeadingRenderer: BlockRenderer {
         }
 
         let headingConfig = NativeRenderConfig(
-            baseFont: .systemFont(ofSize: fontSize, weight: weight),
+            baseFont: FontManager.shared.font(size: fontSize, weight: weight),
             baseColor: config.baseColor,
             linkColor: config.linkColor,
             codeFont: config.codeFont,

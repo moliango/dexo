@@ -5,14 +5,14 @@ final class ReplyComposerViewController: BaseViewController {
     private let topicId: Int
     private let replyToPost: DiscourseTopicDetail.Post?
     private let baseURL: String
-    var onPostCreated: (() -> Void)?
+    var onPostCreated: ((_ postNumber: Int) -> Void)?
 
     private var isEmojiPickerVisible = false
     private var hasLoadedCustomEmojis = false
 
     private let textView: UITextView = {
         let tv = UITextView()
-        tv.font = .systemFont(ofSize: 16)
+        tv.font = FontManager.shared.font(size: 16)
         tv.backgroundColor = .clear
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
@@ -22,7 +22,7 @@ final class ReplyComposerViewController: BaseViewController {
     private let placeholderLabel: UILabel = {
         let label = UILabel()
         label.text = String(localized: "reply.placeholder")
-        label.font = .systemFont(ofSize: 16)
+        label.font = FontManager.shared.font(size: 16)
         label.textColor = .placeholderText
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -30,7 +30,7 @@ final class ReplyComposerViewController: BaseViewController {
 
     private let charCountLabel: UILabel = {
         let label = UILabel()
-        label.font = .monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+        label.font = FontManager.shared.monospacedDigitFont(size: 13)
         label.textColor = .secondaryLabel
         label.text = "0"
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -224,13 +224,14 @@ final class ReplyComposerViewController: BaseViewController {
 
         Task {
             do {
-                _ = try await api.createReply(
+                let response = try await api.createReply(
                     topicId: topicId,
                     replyToPostNumber: replyToPost?.postNumber,
                     raw: raw
                 )
+                let newPostNumber = response.postNumber
                 dismiss(animated: true) { [weak self] in
-                    self?.onPostCreated?()
+                    self?.onPostCreated?(newPostNumber)
                 }
             } catch {
                 navigationItem.rightBarButtonItem = sendButton

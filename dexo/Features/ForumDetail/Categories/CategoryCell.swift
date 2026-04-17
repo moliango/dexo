@@ -12,14 +12,14 @@ final class CategoryCell: UITableViewCell {
 
     private let nameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = FontManager.shared.font(size: 16, weight: .medium)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
     private let descriptionLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 13)
+        label.font = FontManager.shared.font(size: 13)
         label.textColor = .secondaryLabel
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -28,7 +28,7 @@ final class CategoryCell: UITableViewCell {
 
     private let topicCountLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = FontManager.shared.font(size: 14)
         label.textColor = .secondaryLabel
         label.textAlignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -137,7 +137,7 @@ final class CategoryCell: UITableViewCell {
     private func makeSubcategoryTag(name: String, hex: String) -> UIView {
         let label = UILabel()
         label.text = name
-        label.font = .systemFont(ofSize: 11)
+        label.font = FontManager.shared.font(size: 11)
         label.textColor = .secondaryLabel
 
         let dot = UIView()

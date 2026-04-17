@@ -44,7 +44,7 @@ final class TagPickerViewController: BaseViewController, UISearchBarDelegate {
             } else if let tag = self.tags.first(where: { $0.text == identifier }) {
                 var content = cell.defaultContentConfiguration()
                 content.text = "#\(tag.text)"
-                content.textProperties.font = .systemFont(ofSize: 16, weight: .medium)
+                content.textProperties.font = FontManager.shared.font(size: 16, weight: .medium)
                 content.secondaryText = "\(tag.count)"
                 content.secondaryTextProperties.color = .secondaryLabel
                 cell.contentConfiguration = content
@@ -60,7 +60,7 @@ final class TagPickerViewController: BaseViewController, UISearchBarDelegate {
         label.text = String(localized: "search.tag_picker.empty")
         label.textColor = .tertiaryLabel
         label.textAlignment = .center
-        label.font = .systemFont(ofSize: 15)
+        label.font = FontManager.shared.font(size: 15)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
         return label

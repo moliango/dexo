@@ -86,7 +86,7 @@ final class PollView: UIView {
         if let title = poll.title, !title.isEmpty {
             let titleLabel = UILabel()
             titleLabel.text = title
-            titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+            titleLabel.font = FontManager.shared.font(size: 15, weight: .semibold)
             titleLabel.numberOfLines = 0
             mainStack.addArrangedSubview(titleLabel)
         }
@@ -100,7 +100,7 @@ final class PollView: UIView {
         } else {
             typeLabel.text = String(localized: "poll.single_hint")
         }
-        typeLabel.font = .systemFont(ofSize: 12)
+        typeLabel.font = FontManager.shared.font(size: 12)
         typeLabel.textColor = .secondaryLabel
         mainStack.addArrangedSubview(typeLabel)
 
@@ -115,7 +115,7 @@ final class PollView: UIView {
         if isMultiple && isOpen {
             let btn = UIButton(type: .system)
             btn.setTitle(String(localized: "poll.submit"), for: .normal)
-            btn.titleLabel?.font = .systemFont(ofSize: 14, weight: .semibold)
+            btn.titleLabel?.font = FontManager.shared.font(size: 14, weight: .semibold)
             btn.backgroundColor = .systemBlue
             btn.setTitleColor(.white, for: .normal)
             btn.setTitleColor(.white.withAlphaComponent(0.5), for: .disabled)
@@ -143,7 +143,7 @@ final class PollView: UIView {
         ])
         footerStack.addArrangedSubview(voterIcon)
 
-        votersLabel.font = .systemFont(ofSize: 12)
+        votersLabel.font = FontManager.shared.font(size: 12)
         votersLabel.textColor = .tertiaryLabel
         votersLabel.text = "\(poll.voters)"
         footerStack.addArrangedSubview(votersLabel)
@@ -151,7 +151,7 @@ final class PollView: UIView {
         if !isOpen {
             let closedBadge = UILabel()
             closedBadge.text = String(localized: "poll.closed")
-            closedBadge.font = .systemFont(ofSize: 12, weight: .medium)
+            closedBadge.font = FontManager.shared.font(size: 12, weight: .medium)
             closedBadge.textColor = .secondaryLabel
             footerStack.addArrangedSubview(closedBadge)
         }
@@ -164,7 +164,7 @@ final class PollView: UIView {
         if hasVoted && isOpen {
             let btn = UIButton(type: .system)
             btn.setTitle(String(localized: "poll.remove_vote"), for: .normal)
-            btn.titleLabel?.font = .systemFont(ofSize: 12)
+            btn.titleLabel?.font = FontManager.shared.font(size: 12)
             btn.tintColor = .secondaryLabel
             btn.addTarget(self, action: #selector(removeVoteTapped), for: .touchUpInside)
             footerStack.addArrangedSubview(btn)
@@ -267,7 +267,7 @@ final class PollView: UIView {
         // Text
         let textLabel = UILabel()
         textLabel.text = option.html.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
-        textLabel.font = isSelected ? .systemFont(ofSize: 15, weight: .medium) : .systemFont(ofSize: 15)
+        textLabel.font = isSelected ? FontManager.shared.font(size: 15, weight: .medium) : FontManager.shared.font(size: 15)
         textLabel.numberOfLines = 0
         textLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         rowStack.addArrangedSubview(textLabel)
@@ -277,7 +277,7 @@ final class PollView: UIView {
             let pct = totalVotes > 0 ? Int(round(Double(option.votes) / Double(totalVotes) * 100)) : 0
             let statsLabel = UILabel()
             statsLabel.text = "\(pct)%"
-            statsLabel.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+            statsLabel.font = FontManager.shared.monospacedDigitFont(size: 13, weight: .medium)
             statsLabel.textColor = isSelected ? .systemBlue : .secondaryLabel
             statsLabel.setContentHuggingPriority(.required, for: .horizontal)
             statsLabel.setContentCompressionResistancePriority(.required, for: .horizontal)

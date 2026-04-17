@@ -79,7 +79,7 @@ final class OneboxCardView: UIView {
         // Domain label
         let domainLabel = UILabel()
         domainLabel.translatesAutoresizingMaskIntoConstraints = false
-        domainLabel.font = .systemFont(ofSize: 12)
+        domainLabel.font = FontManager.shared.font(size: 12)
         domainLabel.textColor = .secondaryLabel
         if let sourceURL, let url = URL(string: sourceURL), let host = url.host {
             domainLabel.text = host
@@ -133,7 +133,7 @@ final class OneboxCardView: UIView {
 
         if let title, !title.isEmpty {
             let titleLabel = UILabel()
-            titleLabel.font = .systemFont(ofSize: 14, weight: .medium)
+            titleLabel.font = FontManager.shared.font(size: 14, weight: .medium)
             titleLabel.textColor = .link
             titleLabel.numberOfLines = 2
             titleLabel.text = title
@@ -142,7 +142,7 @@ final class OneboxCardView: UIView {
 
         if let description, !description.isEmpty {
             let descLabel = UILabel()
-            descLabel.font = .systemFont(ofSize: 13)
+            descLabel.font = FontManager.shared.font(size: 13)
             descLabel.textColor = .secondaryLabel
             descLabel.numberOfLines = 3
             descLabel.text = description

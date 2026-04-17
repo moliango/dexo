@@ -136,7 +136,7 @@ private final class UnicodeEmojiCell: UICollectionViewCell {
 
     private let label: UILabel = {
         let l = UILabel()
-        l.font = .systemFont(ofSize: 24)
+        l.font = FontManager.shared.font(size: 24)
         l.textAlignment = .center
         l.translatesAutoresizingMaskIntoConstraints = false
         return l

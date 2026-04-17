@@ -6,7 +6,7 @@ final class BookmarkCell: UITableViewCell {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = FontManager.shared.font(size: 16, weight: .medium)
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -14,7 +14,7 @@ final class BookmarkCell: UITableViewCell {
 
     private let excerptLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = FontManager.shared.font(size: 14)
         label.textColor = .secondaryLabel
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -23,17 +23,20 @@ final class BookmarkCell: UITableViewCell {
 
     private let timeLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
+    private static let baseAvatarSize: CGFloat = 36
+    private var avatarWidthConstraint: NSLayoutConstraint!
+    private var avatarHeightConstraint: NSLayoutConstraint!
+
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.layer.cornerRadius = 18
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -55,11 +58,14 @@ final class BookmarkCell: UITableViewCell {
         contentView.addSubview(excerptLabel)
         contentView.addSubview(timeLabel)
 
+        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+
         NSLayoutConstraint.activate([
             avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
-            avatarImageView.widthAnchor.constraint(equalToConstant: 36),
-            avatarImageView.heightAnchor.constraint(equalToConstant: 36),
+            avatarWidthConstraint,
+            avatarHeightConstraint,
 
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             titleLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 10),
@@ -76,6 +82,11 @@ final class BookmarkCell: UITableViewCell {
     }
 
     func configure(with bookmark: DiscourseBookmark, assetBaseURL: String) {
+        let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
+        avatarWidthConstraint.constant = avatarSize
+        avatarHeightConstraint.constant = avatarSize
+        avatarImageView.layer.cornerRadius = avatarSize / 2
+
         titleLabel.text = bookmark.title ?? bookmark.name
         excerptLabel.text = bookmark.excerpt?.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         if let createdAt = bookmark.createdAt {

@@ -25,7 +25,7 @@ enum DiscourseQuoteRenderer: BlockRenderer {
         headerStack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(headerStack)
 
-        let avatarSize: CGFloat = 20
+        let avatarSize = FontManager.shared.scaled(20)
         let avatarImageView = UIImageView()
         avatarImageView.translatesAutoresizingMaskIntoConstraints = false
         avatarImageView.contentMode = .scaleAspectFill
@@ -47,7 +47,7 @@ enum DiscourseQuoteRenderer: BlockRenderer {
             // Topic-link variant: title button + optional category badge
             let titleButton = UIButton(type: .system)
             titleButton.setTitle(topicTitle, for: .normal)
-            titleButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
+            titleButton.titleLabel?.font = FontManager.shared.font(size: 13, weight: .semibold)
             titleButton.titleLabel?.lineBreakMode = .byTruncatingTail
             titleButton.setTitleColor(.link, for: .normal)
             titleButton.contentHorizontalAlignment = .leading
@@ -79,7 +79,7 @@ enum DiscourseQuoteRenderer: BlockRenderer {
         } else if let username, !username.isEmpty {
             // Username variant (existing behavior)
             let nameLabel = UILabel()
-            nameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+            nameLabel.font = FontManager.shared.font(size: 13, weight: .semibold)
             nameLabel.textColor = .secondaryLabel
             nameLabel.text = username
             headerStack.addArrangedSubview(nameLabel)
@@ -148,7 +148,7 @@ private class CategoryBadgeView: UIView {
 
         let label = UILabel()
         label.text = name
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.font = FontManager.shared.font(size: 11, weight: .semibold)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)

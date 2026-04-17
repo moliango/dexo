@@ -4,11 +4,15 @@ import UIKit
 final class TopicCell: UITableViewCell {
     static let reuseIdentifier = "TopicCell"
 
+    private static let baseAvatarSize: CGFloat = 36
+
+    private var avatarWidthConstraint: NSLayoutConstraint!
+    private var avatarHeightConstraint: NSLayoutConstraint!
+
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.layer.cornerRadius = 18
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -16,7 +20,7 @@ final class TopicCell: UITableViewCell {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .medium)
+        label.font = FontManager.shared.font(size: 16, weight: .medium)
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -24,7 +28,7 @@ final class TopicCell: UITableViewCell {
 
     private let replyCountLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 16, weight: .bold)
+        label.font = FontManager.shared.font(size: 16, weight: .bold)
         label.textAlignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false
         label.setContentHuggingPriority(.required, for: .horizontal)
@@ -34,7 +38,7 @@ final class TopicCell: UITableViewCell {
 
     private let categoryLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -42,7 +46,7 @@ final class TopicCell: UITableViewCell {
 
     private let timeLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
         label.textAlignment = .right
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -68,11 +72,14 @@ final class TopicCell: UITableViewCell {
         contentView.addSubview(categoryLabel)
         contentView.addSubview(timeLabel)
 
+        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+
         NSLayoutConstraint.activate([
             avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
-            avatarImageView.widthAnchor.constraint(equalToConstant: 36),
-            avatarImageView.heightAnchor.constraint(equalToConstant: 36),
+            avatarWidthConstraint,
+            avatarHeightConstraint,
 
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             titleLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 10),
@@ -99,6 +106,11 @@ final class TopicCell: UITableViewCell {
         categoryName: String?,
         categoryColor: UIColor?,
     ) {
+        let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
+        avatarWidthConstraint.constant = avatarSize
+        avatarHeightConstraint.constant = avatarSize
+        avatarImageView.layer.cornerRadius = avatarSize / 2
+
         configureTitleWithEmoji(topic.fancyTitle)
 
         // Reply count with gray→orange color
@@ -118,7 +130,7 @@ final class TopicCell: UITableViewCell {
             }
             attrStr.append(NSAttributedString(string: name, attributes: [
                 .foregroundColor: UIColor.secondaryLabel,
-                .font: UIFont.systemFont(ofSize: 12),
+                .font: FontManager.shared.font(size: 12),
             ]))
             categoryLabel.attributedText = attrStr
         } else {
@@ -166,7 +178,7 @@ final class TopicCell: UITableViewCell {
 
         // Single pass: build attributed string and check for resolvable emojis at the same time
         let result = NSMutableAttributedString()
-        let titleFont = titleLabel.font ?? .systemFont(ofSize: 16, weight: .medium)
+        let titleFont = titleLabel.font ?? FontManager.shared.font(size: 16, weight: .medium)
         let attrs: [NSAttributedString.Key: Any] = [.font: titleFont]
         var lastEnd = title.startIndex
         var hasEmoji = false

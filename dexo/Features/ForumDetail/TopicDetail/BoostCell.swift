@@ -145,7 +145,7 @@ private final class BoostActionChipView: UIControl {
 
     private weak var delegate: PostCellDelegate?
     private var post: DiscourseTopicDetail.Post?
-    private let textFont = UIFont.systemFont(ofSize: 13, weight: .medium)
+    private let textFont = FontManager.shared.font(size: 13, weight: .medium)
 
     private let iconView: UIImageView = {
         let imageView = UIImageView()
@@ -157,7 +157,7 @@ private final class BoostActionChipView: UIControl {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.font = FontManager.shared.font(size: 13, weight: .medium)
         label.textColor = .label
         label.text = String(localized: "reply.send")
         return label
@@ -219,7 +219,7 @@ private final class BoostChipView: UIView {
     private weak var delegate: PostCellDelegate?
     private var username: String?
     private var currentBoost: DiscourseTopicDetail.Boost?
-    private let textFont = UIFont.systemFont(ofSize: 13)
+    private let textFont = FontManager.shared.font(size: 13)
 
     private lazy var deleteInteraction = UIContextMenuInteraction(delegate: self)
     private var hasDeleteInteraction = false
@@ -295,7 +295,7 @@ private final class BoostChipView: UIView {
                 baseFont: textFont,
                 baseColor: .label,
                 linkColor: .link,
-                codeFont: .monospacedSystemFont(ofSize: textFont.pointSize, weight: .regular),
+                codeFont: FontManager.shared.monospacedFont(size: textFont.pointSize),
                 codeBackgroundColor: .secondarySystemBackground
             )
         )

@@ -96,7 +96,7 @@ final class VideoCardView: UIView {
 
             let titleLabel = UILabel()
             titleLabel.translatesAutoresizingMaskIntoConstraints = false
-            titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            titleLabel.font = FontManager.shared.font(size: 13, weight: .medium)
             titleLabel.textColor = .white
             titleLabel.numberOfLines = 2
             titleLabel.text = title

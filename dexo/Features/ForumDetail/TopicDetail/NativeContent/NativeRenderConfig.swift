@@ -21,11 +21,12 @@ struct NativeRenderConfig {
     }
 
     static func `default`(contentWidth: CGFloat, baseURL: String? = nil) -> NativeRenderConfig {
-        NativeRenderConfig(
-            baseFont: .systemFont(ofSize: 16),
+        let fm = FontManager.shared
+        return NativeRenderConfig(
+            baseFont: fm.font(size: 16),
             baseColor: .label,
             linkColor: .link,
-            codeFont: .monospacedSystemFont(ofSize: 15, weight: .regular),
+            codeFont: fm.monospacedFont(size: 15),
             codeBackgroundColor: ThemeManager.shared.codeBackgroundColor,
             contentWidth: contentWidth,
             baseURL: baseURL

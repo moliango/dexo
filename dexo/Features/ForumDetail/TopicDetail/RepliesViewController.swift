@@ -361,7 +361,7 @@ extension RepliesViewController: PostCellDelegate {
             replyToPost: post,
             baseURL: baseURL
         )
-        composer.onPostCreated = { [weak self] in
+        composer.onPostCreated = { [weak self] _ in
             guard let self else { return }
             Task { await self.loadReplies() }
         }

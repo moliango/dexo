@@ -159,7 +159,7 @@ final class TopicDetailViewController: ObservableViewController {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 20, weight: .bold)
+        label.font = FontManager.shared.font(size: 20, weight: .bold)
         label.numberOfLines = 0
         return label
     }()
@@ -172,14 +172,14 @@ final class TopicDetailViewController: ObservableViewController {
 
     private let navTitleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 17, weight: .semibold)
+        label.font = FontManager.shared.font(size: 17, weight: .semibold)
         label.numberOfLines = 1
         return label
     }()
 
     private let errorLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = FontManager.shared.font(size: 14)
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -206,7 +206,7 @@ final class TopicDetailViewController: ObservableViewController {
         let label = UILabel()
         label.translatesAutoresizingMaskIntoConstraints = false
         label.text = String(localized: "topic_detail.loading_earlier")
-        label.font = .systemFont(ofSize: 13)
+        label.font = FontManager.shared.font(size: 13)
         label.textColor = .secondaryLabel
         let stack = UIStackView(arrangedSubviews: [spinner, label])
         stack.translatesAutoresizingMaskIntoConstraints = false
@@ -515,7 +515,7 @@ final class TopicDetailViewController: ObservableViewController {
             config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10)
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
                 var outgoing = incoming
-                outgoing.font = .systemFont(ofSize: 13, weight: .medium)
+                outgoing.font = FontManager.shared.font(size: 13, weight: .medium)
                 return outgoing
             }
             config.image = UIImage(systemName: "tag")
@@ -573,8 +573,8 @@ final class TopicDetailViewController: ObservableViewController {
             return
         }
 
-        let headerResult = buildEmojiAttributedString(title, font: titleLabel.font ?? .systemFont(ofSize: 20, weight: .bold))
-        let navResult = buildEmojiAttributedString(title, font: navTitleLabel.font ?? .systemFont(ofSize: 17, weight: .semibold))
+        let headerResult = buildEmojiAttributedString(title, font: titleLabel.font ?? FontManager.shared.font(size: 20, weight: .bold))
+        let navResult = buildEmojiAttributedString(title, font: navTitleLabel.font ?? FontManager.shared.font(size: 17, weight: .semibold))
 
         titleLabel.attributedText = headerResult
         navTitleLabel.attributedText = navResult
@@ -1117,10 +1117,16 @@ extension TopicDetailViewController: PostCellDelegate {
             replyToPost: post,
             baseURL: baseURL
         )
-        composer.onPostCreated = { [weak self] in
+        composer.onPostCreated = { [weak self] newPostNumber in
             guard let self else { return }
+            self.contentViewCache.removeAll()
+            self.cellHeightCache.removeAll()
             Task {
-                await self.viewModel.loadTopic(id: self.topicId, containerWidth: self.view.bounds.width)
+                await self.viewModel.loadTopic(
+                    id: self.topicId,
+                    containerWidth: self.view.bounds.width,
+                    nearPostNumber: newPostNumber
+                )
             }
         }
         let nav = UINavigationController(rootViewController: composer)

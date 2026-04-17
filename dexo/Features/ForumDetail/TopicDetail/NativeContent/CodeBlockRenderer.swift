@@ -23,7 +23,7 @@ enum CodeBlockRenderer: BlockRenderer {
         container.addSubview(headerStack)
 
         let badge = UILabel()
-        badge.font = .systemFont(ofSize: 11, weight: .medium)
+        badge.font = FontManager.shared.font(size: 11, weight: .medium)
         badge.textColor = .tertiaryLabel
         if let language, !language.isEmpty {
             badge.text = language.uppercased()

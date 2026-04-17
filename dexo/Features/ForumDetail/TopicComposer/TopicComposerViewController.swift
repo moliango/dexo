@@ -14,7 +14,7 @@ final class TopicComposerViewController: ObservableViewController {
     private let titleField: UITextField = {
         let tf = UITextField()
         tf.placeholder = String(localized: "compose.title.placeholder")
-        tf.font = .systemFont(ofSize: 17, weight: .semibold)
+        tf.font = FontManager.shared.font(size: 17, weight: .semibold)
         tf.borderStyle = .none
         tf.backgroundColor = .clear
         tf.translatesAutoresizingMaskIntoConstraints = false
@@ -30,7 +30,7 @@ final class TopicComposerViewController: ObservableViewController {
         config.imagePadding = 6
         config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
             var a = attrs
-            a.font = UIFont.systemFont(ofSize: 15, weight: .medium)
+            a.font = FontManager.shared.font(size: 15, weight: .medium)
             return a
         }
         config.baseForegroundColor = .secondaryLabel
@@ -44,7 +44,7 @@ final class TopicComposerViewController: ObservableViewController {
     private let tagField: UITextField = {
         let tf = UITextField()
         tf.placeholder = String(localized: "compose.tags.placeholder")
-        tf.font = .systemFont(ofSize: 15)
+        tf.font = FontManager.shared.font(size: 15)
         tf.borderStyle = .none
         tf.backgroundColor = .clear
         tf.translatesAutoresizingMaskIntoConstraints = false
@@ -93,7 +93,7 @@ final class TopicComposerViewController: ObservableViewController {
 
     private let bodyTextView: UITextView = {
         let tv = UITextView()
-        tv.font = .systemFont(ofSize: 16)
+        tv.font = FontManager.shared.font(size: 16)
         tv.backgroundColor = .clear
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.textContainerInset = UIEdgeInsets(top: 12, left: 8, bottom: 12, right: 8)
@@ -103,7 +103,7 @@ final class TopicComposerViewController: ObservableViewController {
     private let bodyPlaceholder: UILabel = {
         let label = UILabel()
         label.text = String(localized: "compose.body.placeholder")
-        label.font = .systemFont(ofSize: 16)
+        label.font = FontManager.shared.font(size: 16)
         label.textColor = .placeholderText
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -493,7 +493,7 @@ final class TopicComposerViewController: ObservableViewController {
 
         let label = UILabel()
         label.text = tag
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.font = FontManager.shared.font(size: 13, weight: .medium)
         label.textColor = ThemeManager.shared.accentColor
         label.translatesAutoresizingMaskIntoConstraints = false
 
@@ -812,8 +812,8 @@ extension TopicComposerViewController: UITableViewDataSource, UITableViewDelegat
         var content = cell.defaultContentConfiguration()
         content.text = tag.text
         content.secondaryText = "\(tag.count)"
-        content.textProperties.font = .systemFont(ofSize: 15)
-        content.secondaryTextProperties.font = .systemFont(ofSize: 13)
+        content.textProperties.font = FontManager.shared.font(size: 15)
+        content.secondaryTextProperties.font = FontManager.shared.font(size: 13)
         content.secondaryTextProperties.color = .secondaryLabel
         cell.contentConfiguration = content
         cell.backgroundColor = .systemBackground

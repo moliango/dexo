@@ -188,7 +188,7 @@ private final class ThemePresetCell: UITableViewCell {
         colorsStack.translatesAutoresizingMaskIntoConstraints = false
         for dot in dots { colorsStack.addArrangedSubview(dot) }
 
-        nameLabel.font = .systemFont(ofSize: 16)
+        nameLabel.font = FontManager.shared.font(size: 16)
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
         contentView.addSubview(nameLabel)
@@ -393,7 +393,7 @@ extension CustomThemeViewController: UITableViewDataSource {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
         cell.textLabel?.text = rowTitle(row)
         cell.detailTextLabel?.text = "#\(hex)"
-        cell.detailTextLabel?.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
+        cell.detailTextLabel?.font = FontManager.shared.monospacedFont(size: 13)
         cell.backgroundColor = themeManager.cardBackgroundColor
 
         let colorView = UIView(frame: CGRect(x: 0, y: 0, width: 28, height: 28))

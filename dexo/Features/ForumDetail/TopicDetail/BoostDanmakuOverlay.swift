@@ -33,7 +33,7 @@ final class BoostDanmakuCell: DanmakuCell {
         static let minimumChipHeight: CGFloat = 26
     }
 
-    private let textFont = UIFont.systemFont(ofSize: 13)
+    private let textFont = FontManager.shared.font(size: 13)
 
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
@@ -94,7 +94,7 @@ final class BoostDanmakuCell: DanmakuCell {
                 baseFont: textFont,
                 baseColor: .label,
                 linkColor: .link,
-                codeFont: .monospacedSystemFont(ofSize: textFont.pointSize, weight: .regular),
+                codeFont: FontManager.shared.monospacedFont(size: textFont.pointSize),
                 codeBackgroundColor: .secondarySystemBackground
             )
         )
@@ -195,7 +195,7 @@ final class BoostDanmakuOverlay {
         danmakuView = dv
         dv.play()
 
-        let textFont = UIFont.systemFont(ofSize: 13)
+        let textFont = FontManager.shared.font(size: 13)
         for (i, boost) in boosts.enumerated() {
             let model = BoostDanmakuCellModel()
             model.identifier = "\(boost.id)"
@@ -230,7 +230,7 @@ final class BoostDanmakuOverlay {
                 baseFont: font,
                 baseColor: .label,
                 linkColor: .link,
-                codeFont: .monospacedSystemFont(ofSize: font.pointSize, weight: .regular),
+                codeFont: FontManager.shared.monospacedFont(size: font.pointSize),
                 codeBackgroundColor: .secondarySystemBackground
             )
         )

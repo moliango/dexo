@@ -12,11 +12,14 @@ final class ProfileHeaderView: UIView {
     var onLoginTapped: (() -> Void)?
     var onStatTapped: ((StatType) -> Void)?
 
+    private static let baseAvatarSize: CGFloat = 50
+    private var avatarWidthConstraint: NSLayoutConstraint!
+    private var avatarHeightConstraint: NSLayoutConstraint!
+
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.layer.cornerRadius = 25
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -24,7 +27,7 @@ final class ProfileHeaderView: UIView {
 
     private let usernameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = FontManager.shared.font(size: 14)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -32,14 +35,14 @@ final class ProfileHeaderView: UIView {
 
     private let displayNameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 18, weight: .bold)
+        label.font = FontManager.shared.font(size: 18, weight: .bold)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = FontManager.shared.font(size: 14)
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -48,7 +51,7 @@ final class ProfileHeaderView: UIView {
 
     private let bioLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14)
+        label.font = FontManager.shared.font(size: 14)
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
@@ -58,7 +61,7 @@ final class ProfileHeaderView: UIView {
 
     private let joinDateLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .tertiaryLabel
         label.textAlignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -155,9 +158,12 @@ final class ProfileHeaderView: UIView {
         addSubview(loggedInContainer)
         addSubview(loggedOutContainer)
 
+        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+
         NSLayoutConstraint.activate([
-            avatarImageView.widthAnchor.constraint(equalToConstant: 50),
-            avatarImageView.heightAnchor.constraint(equalToConstant: 50),
+            avatarWidthConstraint,
+            avatarHeightConstraint,
 
             loggedInContainer.topAnchor.constraint(equalTo: topAnchor, constant: 24),
             loggedInContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
@@ -177,6 +183,11 @@ final class ProfileHeaderView: UIView {
     }
 
     func configure(user: DiscourseCurrentUser?, userProfile: DiscourseUserProfile?, summary: DiscourseUserSummary?, assetBaseURL: String) {
+        let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
+        avatarWidthConstraint.constant = avatarSize
+        avatarHeightConstraint.constant = avatarSize
+        avatarImageView.layer.cornerRadius = avatarSize / 2
+
         if let user {
             loggedInContainer.isHidden = false
             loggedOutContainer.isHidden = true
@@ -260,12 +271,12 @@ final class ProfileHeaderView: UIView {
         container.addGestureRecognizer(tap)
 
         let valueLabel = UILabel()
-        valueLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        valueLabel.font = FontManager.shared.font(size: 18, weight: .bold)
         valueLabel.text = "\(value)"
         valueLabel.textAlignment = .center
 
         let titleLabel = UILabel()
-        titleLabel.font = .systemFont(ofSize: 12)
+        titleLabel.font = FontManager.shared.font(size: 12)
         titleLabel.textColor = .secondaryLabel
         titleLabel.text = title
         titleLabel.textAlignment = .center

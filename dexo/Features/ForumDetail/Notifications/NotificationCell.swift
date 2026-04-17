@@ -13,7 +13,7 @@ final class NotificationCell: UITableViewCell {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 15, weight: .medium)
+        label.font = FontManager.shared.font(size: 15, weight: .medium)
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -21,7 +21,7 @@ final class NotificationCell: UITableViewCell {
 
     private let detailLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 13)
+        label.font = FontManager.shared.font(size: 13)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -29,7 +29,7 @@ final class NotificationCell: UITableViewCell {
 
     private let timeLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -93,8 +93,8 @@ final class NotificationCell: UITableViewCell {
         iconImageView.image = Self.icon(for: notification.notificationType)
 
         titleLabel.font = notification.read
-            ? .systemFont(ofSize: 15)
-            : .systemFont(ofSize: 15, weight: .medium)
+            ? FontManager.shared.font(size: 15)
+            : FontManager.shared.font(size: 15, weight: .medium)
     }
 
     override func prepareForReuse() {

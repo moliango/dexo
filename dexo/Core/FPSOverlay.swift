@@ -35,7 +35,7 @@ final class FPSOverlay {
         let root = PassthroughViewController()
         w.rootViewController = root
 
-        label.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        label.font = FontManager.shared.monospacedDigitFont(size: 11, weight: .semibold)
         label.textColor = .white
         label.textAlignment = .center
         label.backgroundColor = UIColor.black.withAlphaComponent(0.55)

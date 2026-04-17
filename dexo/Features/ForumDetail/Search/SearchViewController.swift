@@ -246,7 +246,7 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         config.title = title
         config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
             var out = incoming
-            out.font = .systemFont(ofSize: 13, weight: .medium)
+            out.font = FontManager.shared.font(size: 13, weight: .medium)
             return out
         }
 

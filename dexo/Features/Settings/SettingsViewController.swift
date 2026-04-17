@@ -27,6 +27,9 @@ final class SettingsViewController: ObservableViewController {
     }
 
     override func updateUI() {
+        // Read FontManager.revision so @Observable tracking triggers
+        // a reload when font size changes.
+        _ = FontManager.shared.scale
         tableView.reloadData()
     }
 
@@ -78,7 +81,7 @@ extension SettingsViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch visibleSections[section] {
         case .general: return 2
-        case .appearance: return 2
+        case .appearance: return 3
         case .network: return networkRows().count
         #if DEBUG
         case .debug: return 1
@@ -108,8 +111,10 @@ extension SettingsViewController: UITableViewDataSource {
         case .appearance:
             if indexPath.row == 0 {
                 return makeAppearanceCell(tableView, indexPath: indexPath)
-            } else {
+            } else if indexPath.row == 1 {
                 return makeThemeCell(tableView, indexPath: indexPath)
+            } else {
+                return makeFontSizeCell(tableView, indexPath: indexPath)
             }
         case .network:
             let row = networkRows()[indexPath.row]
@@ -130,8 +135,15 @@ extension SettingsViewController: UITableViewDataSource {
 
     // MARK: - Cell Factories
 
+    private func applyFonts(to cell: UITableViewCell) {
+        let fm = FontManager.shared
+        cell.textLabel?.font = fm.font(size: 17)
+        cell.detailTextLabel?.font = fm.font(size: 17)
+    }
+
     private func makeAutoOpenCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = String(localized: "settings.auto_open_last_forum")
         cell.selectionStyle = .none
         let toggle = UISwitch()
@@ -143,6 +155,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     private func makeAppearanceCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = String(localized: "settings.dark_mode")
         cell.detailTextLabel?.text = settings.appearanceMode.title
         cell.accessoryType = .disclosureIndicator
@@ -152,6 +165,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     private func makeThemeCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = String(localized: "settings.theme")
         cell.detailTextLabel?.text = themeManager.currentTheme.name
         cell.accessoryType = .disclosureIndicator
@@ -159,8 +173,21 @@ extension SettingsViewController: UITableViewDataSource {
         return cell
     }
 
+    private func makeFontSizeCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
+        cell.textLabel?.text = String(localized: "settings.font_size")
+        let level = settings.fontSizeLevel
+        cell.detailTextLabel?.text = level == 0
+            ? String(localized: "font_size.default")
+            : "\(level > 0 ? "+" : "")\(level)"
+        cell.accessoryType = .disclosureIndicator
+        return cell
+    }
+
     private func makeBoostDisplayCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = String(localized: "settings.boost_display")
         cell.detailTextLabel?.text = settings.boostDisplayMode.title
         cell.accessoryType = .disclosureIndicator
@@ -169,6 +196,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     private func makeDohToggleCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = "DNS over HTTPS"
         cell.selectionStyle = .none
         let toggle = UISwitch()
@@ -180,6 +208,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     private func makeDohProviderCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = "Provider"
         cell.detailTextLabel?.text = settings.dohProvider.title
         cell.accessoryType = .disclosureIndicator
@@ -188,6 +217,7 @@ extension SettingsViewController: UITableViewDataSource {
 
     private func makeDohCustomURLCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = "Custom URL"
         cell.detailTextLabel?.text = settings.dohCustomURL.isEmpty ? "Not Set" : settings.dohCustomURL
         cell.detailTextLabel?.textColor = settings.dohCustomURL.isEmpty ? .placeholderText : .secondaryLabel
@@ -198,6 +228,7 @@ extension SettingsViewController: UITableViewDataSource {
     #if DEBUG
     private func makeRenderPreviewCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
         let cell = UITableViewCell(style: .default, reuseIdentifier: nil)
+        applyFonts(to: cell)
         cell.textLabel?.text = "Render Preview"
         cell.accessoryType = .disclosureIndicator
         return cell
@@ -219,8 +250,11 @@ extension SettingsViewController: UITableViewDelegate {
         case .appearance:
             if indexPath.row == 0 {
                 showAppearancePicker()
-            } else {
+            } else if indexPath.row == 1 {
                 let vc = ThemePickerViewController()
+                navigationController?.pushViewController(vc, animated: true)
+            } else {
+                let vc = FontSizeViewController()
                 navigationController?.pushViewController(vc, animated: true)
             }
         case .network:

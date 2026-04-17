@@ -13,11 +13,14 @@ final class MessageCell: UITableViewCell {
         return v
     }()
 
+    private static let baseAvatarSize: CGFloat = 36
+    private var avatarWidthConstraint: NSLayoutConstraint!
+    private var avatarHeightConstraint: NSLayoutConstraint!
+
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.layer.cornerRadius = 18
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -25,7 +28,7 @@ final class MessageCell: UITableViewCell {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 15, weight: .medium)
+        label.font = FontManager.shared.font(size: 15, weight: .medium)
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -33,7 +36,7 @@ final class MessageCell: UITableViewCell {
 
     private let participantsLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 13)
+        label.font = FontManager.shared.font(size: 13)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -41,7 +44,7 @@ final class MessageCell: UITableViewCell {
 
     private let metaLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -64,6 +67,9 @@ final class MessageCell: UITableViewCell {
         contentView.addSubview(participantsLabel)
         contentView.addSubview(metaLabel)
 
+        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+
         NSLayoutConstraint.activate([
             unreadDot.widthAnchor.constraint(equalToConstant: 8),
             unreadDot.heightAnchor.constraint(equalToConstant: 8),
@@ -72,8 +78,8 @@ final class MessageCell: UITableViewCell {
 
             avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
-            avatarImageView.widthAnchor.constraint(equalToConstant: 36),
-            avatarImageView.heightAnchor.constraint(equalToConstant: 36),
+            avatarWidthConstraint,
+            avatarHeightConstraint,
 
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
             titleLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 10),
@@ -90,6 +96,11 @@ final class MessageCell: UITableViewCell {
     }
 
     func configure(with topic: DiscourseTopicList.Topic, users: [DiscourseTopicList.User]?, assetBaseURL: String, hasUnread: Bool = false) {
+        let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
+        avatarWidthConstraint.constant = avatarSize
+        avatarHeightConstraint.constant = avatarSize
+        avatarImageView.layer.cornerRadius = avatarSize / 2
+
         unreadDot.isHidden = !hasUnread
         titleLabel.text = topic.title
 

@@ -11,7 +11,7 @@ final class PostNativeCell: UITableViewCell {
     /// Pre-rendered OP badge image with rounded corners (cached once).
     private static let opBadgeImage: UIImage = {
         let text = "OP"
-        let font = UIFont.systemFont(ofSize: 10, weight: .bold)
+        let font = FontManager.shared.font(size: 10, weight: .bold)
         let textSize = (text as NSString).size(withAttributes: [.font: font])
         let padding = UIEdgeInsets(top: 1.5, left: 4, bottom: 1.5, right: 4)
         let size = CGSize(
@@ -45,11 +45,17 @@ final class PostNativeCell: UITableViewCell {
 
     // MARK: - Header UI
 
+    private static let baseAvatarSize: CGFloat = 32
+    private static let baseFlairSize: CGFloat = 14
+    private var avatarWidthConstraint: NSLayoutConstraint!
+    private var avatarHeightConstraint: NSLayoutConstraint!
+    private var flairWidthConstraint: NSLayoutConstraint!
+    private var flairHeightConstraint: NSLayoutConstraint!
+
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.layer.cornerRadius = 16
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -59,7 +65,6 @@ final class PostNativeCell: UITableViewCell {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
-        iv.layer.cornerRadius = 7
         iv.layer.borderWidth = 1
         iv.layer.borderColor = UIColor.systemBackground.cgColor
         iv.translatesAutoresizingMaskIntoConstraints = false
@@ -69,14 +74,14 @@ final class PostNativeCell: UITableViewCell {
 
     private let nameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 14, weight: .semibold)
+        label.font = FontManager.shared.font(size: 14, weight: .semibold)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
     private let usernameLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -84,7 +89,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let userTitleLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
@@ -93,7 +98,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let timeLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -101,7 +106,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let floorLabel: UILabel = {
         let label = UILabel()
-        label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        label.font = FontManager.shared.monospacedDigitFont(size: 12)
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -110,7 +115,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let replyToLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
@@ -131,7 +136,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let showRepliesButton: UIButton = {
         let button = UIButton(type: .system)
-        button.titleLabel?.font = .systemFont(ofSize: 12, weight: .medium)
+        button.titleLabel?.font = FontManager.shared.font(size: 12, weight: .medium)
         button.tintColor = .secondaryLabel
         button.contentHorizontalAlignment = .leading
         button.isHidden = true
@@ -161,7 +166,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let reactionCountLabel: UILabel = {
         let label = UILabel()
-        label.font = .systemFont(ofSize: 12)
+        label.font = FontManager.shared.font(size: 12)
         label.textColor = .secondaryLabel
         return label
     }()
@@ -179,7 +184,7 @@ final class PostNativeCell: UITableViewCell {
         let button = UIButton(type: .system)
         let config = PostNativeCell.symbolConfig
         button.setImage(UIImage(systemName: "heart", withConfiguration: config), for: .normal)
-        button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        button.titleLabel?.font = FontManager.shared.monospacedDigitFont(size: 11, weight: .medium)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
@@ -199,7 +204,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let boostButton: UIButton = {
         let button = UIButton(type: .system)
-        button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
+        button.titleLabel?.font = FontManager.shared.monospacedDigitFont(size: 11, weight: .medium)
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
@@ -291,16 +296,21 @@ final class PostNativeCell: UITableViewCell {
         contentView.addSubview(copyLinkButton)
         contentView.addSubview(separatorLine)
 
+        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        flairWidthConstraint = flairImageView.widthAnchor.constraint(equalToConstant: Self.baseFlairSize)
+        flairHeightConstraint = flairImageView.heightAnchor.constraint(equalToConstant: Self.baseFlairSize)
+
         NSLayoutConstraint.activate([
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
             avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-            avatarImageView.widthAnchor.constraint(equalToConstant: 32),
-            avatarImageView.heightAnchor.constraint(equalToConstant: 32),
+            avatarWidthConstraint,
+            avatarHeightConstraint,
 
             flairImageView.bottomAnchor.constraint(equalTo: avatarImageView.bottomAnchor, constant: 2),
             flairImageView.trailingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 2),
-            flairImageView.widthAnchor.constraint(equalToConstant: 14),
-            flairImageView.heightAnchor.constraint(equalToConstant: 14),
+            flairWidthConstraint,
+            flairHeightConstraint,
 
             nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
             nameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
@@ -403,6 +413,16 @@ final class PostNativeCell: UITableViewCell {
         isBoostsExpanded: Bool,
         showsSeparator: Bool,
     ) {
+        let fm = FontManager.shared
+        let avatarSize = fm.scaled(Self.baseAvatarSize)
+        avatarWidthConstraint.constant = avatarSize
+        avatarHeightConstraint.constant = avatarSize
+        avatarImageView.layer.cornerRadius = avatarSize / 2
+        let flairSize = fm.scaled(Self.baseFlairSize)
+        flairWidthConstraint.constant = flairSize
+        flairHeightConstraint.constant = flairSize
+        flairImageView.layer.cornerRadius = flairSize / 2
+
         postId = post.id
         self.postLink = postLink
         currentPost = post
@@ -413,12 +433,12 @@ final class PostNativeCell: UITableViewCell {
         if post.postNumber == 1 {
             let attr = NSMutableAttributedString(
                 string: post.name ?? post.username,
-                attributes: [.font: UIFont.systemFont(ofSize: 14, weight: .semibold)]
+                attributes: [.font: FontManager.shared.font(size: 14, weight: .semibold)]
             )
             attr.append(NSAttributedString(string: "  "))
             let attachment = NSTextAttachment()
             attachment.image = Self.opBadgeImage
-            let nameFont = UIFont.systemFont(ofSize: 14, weight: .semibold)
+            let nameFont = FontManager.shared.font(size: 14, weight: .semibold)
             attachment.bounds = CGRect(
                 x: 0,
                 y: (nameFont.capHeight - Self.opBadgeImage.size.height) / 2,
@@ -916,7 +936,7 @@ final class PostNativeCell: UITableViewCell {
             ])
         } else {
             button.setTitle(":\(reactionId):", for: .normal)
-            button.titleLabel?.font = .systemFont(ofSize: 11)
+            button.titleLabel?.font = FontManager.shared.font(size: 11)
             button.setTitleColor(.label, for: .normal)
         }
 
