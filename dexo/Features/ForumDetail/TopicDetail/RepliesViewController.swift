@@ -13,6 +13,7 @@ final class RepliesViewController: BaseViewController {
     private let topicId: Int
     private let baseURL: String
     private let assetBaseURL: String
+    private let validReactions: [String]
 
     private var replies: [DiscourseTopicDetail.Post] = []
     private var parsedBlocks: [Int: [AnnotatedBlock]] = [:]
@@ -53,7 +54,7 @@ final class RepliesViewController: BaseViewController {
                 postLink: postLink,
                 baseURL: self.baseURL,
                 assetBaseURL: self.assetBaseURL,
-                validReactions: [],
+                validReactions: validReactions,
                 isBoostsExpanded: isBoostsExpanded,
                 showsSeparator: !isBoostsExpanded,
             )
@@ -82,10 +83,11 @@ final class RepliesViewController: BaseViewController {
         return ai
     }()
 
-    init(api: DiscourseAPI, postId: Int, topicId: Int) {
+    init(api: DiscourseAPI, postId: Int, topicId: Int, validReactions: [String] = []) {
         self.api = api
         self.postId = postId
         self.topicId = topicId
+        self.validReactions = validReactions
         self.baseURL = api.baseURL
         self.assetBaseURL = api.assetBaseURL
         super.init(nibName: nil, bundle: nil)
@@ -99,7 +101,6 @@ final class RepliesViewController: BaseViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Replies"
-
 
         view.addSubview(tableView)
         view.addSubview(activityIndicator)
@@ -183,7 +184,12 @@ extension RepliesViewController: PostCellDelegate {
     }
 
     func postCell(didTapShowRepliesForPostId postId: Int) {
-        let repliesVC = RepliesViewController(api: api, postId: postId, topicId: topicId)
+        let repliesVC = RepliesViewController(
+            api: api,
+            postId: postId,
+            topicId: topicId,
+            validReactions: validReactions
+        )
         if let sheet = repliesVC.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
@@ -231,9 +237,51 @@ extension RepliesViewController: PostCellDelegate {
         Task {
             do {
                 try await api.toggleReaction(postId: post.id, reactionId: reactionId)
+                await refreshPost(id: post.id)
+            } catch {
+                // Optimistic UI — server state will reconcile on next refresh
+                debugLog("didTapReaction 发生错误: \(error)")
+            }
+        }
+    }
+
+    func postCell(didToggleLikeForPost post: DiscourseTopicDetail.Post, liked: Bool) {
+        Task {
+            do {
+                if liked {
+                    try await api.likePost(postId: post.id)
+                } else {
+                    try await api.unlikePost(postId: post.id)
+                }
+                await refreshPost(id: post.id)
             } catch {
                 // Optimistic UI — server state will reconcile on next refresh
             }
+        }
+    }
+
+    /// Re-fetch a single post and reconfigure its row.
+    private func refreshPost(id: Int) async {
+        guard let fresh = try? await api.fetchPost(id: id) else { return }
+        guard let index = replies.firstIndex(where: { $0.id == id }) else { return }
+        let existing = replies[index]
+        let cookedChanged = existing.cooked != fresh.cooked
+        // Carry over plugin-only fields stripped by /posts/{id}.json so the
+        // boost button / poll state aren't reset by the refresh.
+        var merged = fresh
+        merged.boosts = existing.boosts
+        merged.canBoost = existing.canBoost
+        merged.polls = existing.polls
+        merged.pollsVotes = existing.pollsVotes
+        replies[index] = merged
+        if cookedChanged {
+            parsedBlocks[id] = CookedHTMLParser.parseAnnotated(html: merged.cooked, baseURL: api.baseURL)
+        }
+        var snapshot = dataSource.snapshot()
+        let item = ReplyItem.post(id)
+        if snapshot.itemIdentifiers.contains(item) {
+            snapshot.reconfigureItems([item])
+            await dataSource.apply(snapshot, animatingDifferences: false)
         }
     }
 

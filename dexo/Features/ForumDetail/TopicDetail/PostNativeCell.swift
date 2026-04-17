@@ -179,9 +179,22 @@ final class PostNativeCell: UITableViewCell {
         let button = UIButton(type: .system)
         let config = PostNativeCell.symbolConfig
         button.setImage(UIImage(systemName: "heart", withConfiguration: config), for: .normal)
+        button.titleLabel?.font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
+    }()
+
+    /// Overlay shown on top of the heart symbol when the user has a current
+    /// reaction. Constrained to a fixed size so a large source emoji image
+    /// can't bloat the button frame and shove sibling buttons (boost) around.
+    private let userReactionImageView: UIImageView = {
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFit
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        iv.isUserInteractionEnabled = false
+        iv.isHidden = true
+        return iv
     }()
 
     private let boostButton: UIButton = {
@@ -270,6 +283,8 @@ final class PostNativeCell: UITableViewCell {
         reactionCountLabel.isHidden = true
         bottomLeftStack.addArrangedSubview(reactionStackView)
         contentView.addSubview(bottomLeftStack)
+        contentView.addSubview(reactButton)
+        reactButton.addSubview(userReactionImageView)
         contentView.addSubview(boostButton)
         contentView.addSubview(bookmarkButton)
         contentView.addSubview(replyButton)
@@ -325,6 +340,19 @@ final class PostNativeCell: UITableViewCell {
             copyLinkButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
             copyLinkButton.widthAnchor.constraint(equalToConstant: 28),
 
+            reactButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
+            reactButton.trailingAnchor.constraint(equalTo: boostButton.leadingAnchor),
+            reactButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            // Match the visual rhythm of the other 28pt buttons; allow growth
+            // so the like count " N" still fits when no reactions plugin.
+            reactButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 28),
+
+            userReactionImageView.widthAnchor.constraint(equalToConstant: 14),
+            userReactionImageView.heightAnchor.constraint(equalToConstant: 14),
+            userReactionImageView.centerYAnchor.constraint(equalTo: reactButton.centerYAnchor),
+            // Centered like the heart symbol so the swap looks in-place.
+            userReactionImageView.centerXAnchor.constraint(equalTo: reactButton.centerXAnchor),
+
             boostButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 4),
             boostButton.trailingAnchor.constraint(equalTo: bookmarkButton.leadingAnchor),
             boostButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
@@ -343,6 +371,9 @@ final class PostNativeCell: UITableViewCell {
         showRepliesButton.addTarget(self, action: #selector(repliesButtonTapped), for: .touchUpInside)
         copyLinkButton.addTarget(self, action: #selector(copyLinkTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
+        reactButton.addTarget(self, action: #selector(reactButtonTapped), for: .touchUpInside)
+        let reactLongPress = UILongPressGestureRecognizer(target: self, action: #selector(reactButtonLongPressed(_:)))
+        reactButton.addGestureRecognizer(reactLongPress)
         boostButton.addTarget(self, action: #selector(boostButtonTapped), for: .touchUpInside)
         let longPress = UILongPressGestureRecognizer(target: self, action: #selector(boostButtonLongPressed(_:)))
         boostButton.addGestureRecognizer(longPress)
@@ -445,6 +476,38 @@ final class PostNativeCell: UITableViewCell {
         // Reactions
         configureReactions(post.reactions, count: post.reactionUsersCount, baseURL: baseURL)
 
+        // Heart / like button state — driven by actions_summary id==2
+        let symbolConfig = Self.symbolConfig
+        let likeAction = post.likeAction
+        let liked = likeAction?.acted == true
+        let canAct = likeAction?.canAct == true
+        let likeCount = likeAction?.count ?? 0
+        // When the reactions plugin is active (validReactions non-empty), the
+        // reactionStackView owns the count + "liked" indication —
+        // `reaction_users_count == actions_summary[id==2].count`. Keep the
+        // heart button as a plain action affordance: no count, no red fill.
+        let reactionsPluginActive = !validReactions.isEmpty
+        reactButton.setTitle(nil, for: .normal)
+        // Always set the heart symbol — overlay (userReactionImageView) hides
+        // it when needed but preserves the button's intrinsic size.
+        let heartName = (liked && !reactionsPluginActive) ? "heart.fill" : "heart"
+        reactButton.setImage(UIImage(systemName: heartName, withConfiguration: symbolConfig), for: .normal)
+
+        if reactionsPluginActive, let userReaction = post.currentUserReaction {
+            applyUserReactionImage(userReaction.id)
+        } else {
+            cancelUserReactionImageLoad()
+            if !reactionsPluginActive, likeCount > 0 {
+                reactButton.setTitle(" \(likeCount)", for: .normal)
+            }
+            reactButton.tintColor = (liked && !reactionsPluginActive) ? .systemRed : .tertiaryLabel
+        }
+        // Enabled when the user can like, or has already liked (and may undo).
+        reactButton.isEnabled = canAct || liked
+        // Hide entirely when there's nothing to show — own post with zero likes
+        // and no reactions plugin to provide the affordance.
+        reactButton.isHidden = !canAct && !liked && likeCount == 0 && !reactionsPluginActive
+
         // Boost
         let boostCount = post.boosts.count
         let hasMine = post.boosts.contains { $0.canDelete == true }
@@ -520,6 +583,31 @@ final class PostNativeCell: UITableViewCell {
                 avatarImageView.sd_setImage(with: url)
             }
         }
+    }
+
+    /// Show the user's chosen reaction emoji as an overlay on top of the
+    /// (transparent) heart symbol. Using a fixed-size overlay keeps the
+    /// button's intrinsic size stable so neighbouring buttons (boost) don't
+    /// shift around when the source emoji image is large.
+    private func applyUserReactionImage(_ reactionId: String) {
+        userReactionImageView.sd_cancelCurrentImageLoad()
+        userReactionImageView.isHidden = false
+        // Hide the heart symbol underneath without losing the button's frame.
+        reactButton.tintColor = .clear
+        guard let urlString = EmojiStore.url(for: reactionId) ?? EmojiStore.lookup(for: reactionId),
+              let url = URL(string: urlString)
+        else {
+            // No mapping — restore the heart instead of leaving the slot blank.
+            cancelUserReactionImageLoad()
+            return
+        }
+        userReactionImageView.sd_setImage(with: url)
+    }
+
+    private func cancelUserReactionImageLoad() {
+        userReactionImageView.sd_cancelCurrentImageLoad()
+        userReactionImageView.image = nil
+        userReactionImageView.isHidden = true
     }
 
     private func configureReactions(_ reactions: [DiscourseTopicDetail.Reaction], count: Int, baseURL: String) {
@@ -675,72 +763,114 @@ final class PostNativeCell: UITableViewCell {
     @objc private func reactButtonTapped() {
         guard let post = currentPost else { return }
 
-        if validReactions.isEmpty {
-            // No valid_reactions field — just toggle like
-            delegate?.postCell(didTapReaction: "heart", forPost: post)
+        // Reactions plugin path. The standard like is undone via DELETE
+        // /post_actions, but any non-heart reaction can only be cleared via
+        // the reactions toggle endpoint — keep the cancel path consistent
+        // and route every interaction through toggleReaction.
+        if !validReactions.isEmpty {
+            if let userReaction = post.currentUserReaction {
+                // Already reacted — tap clears it (if still within the undo
+                // window). Past the window, show the picker so the user can
+                // pick again or no-op.
+                if userReaction.canUndo == true {
+                    delegate?.postCell(didTapReaction: userReaction.id, forPost: post)
+                } else {
+                    presentReactionPicker(for: post)
+                }
+            } else {
+                presentReactionPicker(for: post)
+            }
             return
         }
 
-        // Build emoji picker as a horizontal stack in a popover
-        let pickerVC = UIViewController()
-        let stack = UIStackView()
-        stack.axis = .horizontal
-        stack.spacing = 8
-        stack.alignment = .center
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        pickerVC.view.addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.topAnchor.constraint(equalTo: pickerVC.view.topAnchor, constant: 8),
-            stack.bottomAnchor.constraint(equalTo: pickerVC.view.bottomAnchor, constant: -8),
-            stack.leadingAnchor.constraint(equalTo: pickerVC.view.leadingAnchor, constant: 12),
-            stack.trailingAnchor.constraint(equalTo: pickerVC.view.trailingAnchor, constant: -12),
-        ])
+        // No reactions plugin — tap toggles the standard like.
+        let wasLiked = post.likeAction?.acted == true
+        let liked = !wasLiked
 
-        let emojiSize: CGFloat = 28
-        for reactionId in validReactions {
-            let button = UIButton(type: .custom)
-            button.translatesAutoresizingMaskIntoConstraints = false
-            NSLayoutConstraint.activate([
-                button.widthAnchor.constraint(equalToConstant: emojiSize),
-                button.heightAnchor.constraint(equalToConstant: emojiSize),
-            ])
-            button.accessibilityLabel = reactionId
+        // Past the unlike grace window — Discourse rejects the DELETE.
+        if !liked, post.likeAction?.canUndo == false { return }
 
-            if let urlString = EmojiStore.url(for: reactionId) ?? EmojiStore.lookup(for: reactionId),
-               let url = URL(string: urlString)
-            {
-                let iv = UIImageView()
-                iv.contentMode = .scaleAspectFit
-                iv.translatesAutoresizingMaskIntoConstraints = false
-                iv.sd_setImage(with: url)
-                iv.isUserInteractionEnabled = false
-                button.addSubview(iv)
-                NSLayoutConstraint.activate([
-                    iv.topAnchor.constraint(equalTo: button.topAnchor),
-                    iv.bottomAnchor.constraint(equalTo: button.bottomAnchor),
-                    iv.leadingAnchor.constraint(equalTo: button.leadingAnchor),
-                    iv.trailingAnchor.constraint(equalTo: button.trailingAnchor),
-                ])
-            } else {
-                button.setTitle(":\(reactionId):", for: .normal)
-                button.titleLabel?.font = .systemFont(ofSize: 12)
-                button.setTitleColor(.label, for: .normal)
-            }
-
-            button.addAction(UIAction { [weak self] _ in
-                guard let self, let post = self.currentPost else { return }
-                pickerVC.dismiss(animated: true)
-                self.delegate?.postCell(didTapReaction: reactionId, forPost: post)
-            }, for: .touchUpInside)
-
-            stack.addArrangedSubview(button)
+        // Optimistic UI — server state will reconcile on next refresh.
+        let config = Self.symbolConfig
+        if liked {
+            reactButton.setImage(UIImage(systemName: "heart.fill", withConfiguration: config), for: .normal)
+            reactButton.tintColor = .systemRed
+        } else {
+            reactButton.setImage(UIImage(systemName: "heart", withConfiguration: config), for: .normal)
+            reactButton.tintColor = .tertiaryLabel
         }
 
-        let pickerSize = CGSize(
-            width: CGFloat(validReactions.count) * (emojiSize + 8) + 16,
-            height: emojiSize + 16
+        delegate?.postCell(didToggleLikeForPost: post, liked: liked)
+    }
+
+    @objc private func reactButtonLongPressed(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began, let post = currentPost else { return }
+        // Respect the same gating as a tap — own posts shouldn't open the picker.
+        guard reactButton.isEnabled else { return }
+
+        if validReactions.isEmpty {
+            // No reactions plugin — long press behaves the same as tap.
+            let wasLiked = post.likeAction?.acted == true
+            delegate?.postCell(didToggleLikeForPost: post, liked: !wasLiked)
+            return
+        }
+
+        presentReactionPicker(for: post)
+    }
+
+    private func presentReactionPicker(for post: DiscourseTopicDetail.Post) {
+        // Build emoji picker as a 2-row grid in a popover.
+        let pickerVC = UIViewController()
+        let emojiSize: CGFloat = 32
+        let hSpacing: CGFloat = 6
+        let vSpacing: CGFloat = 6
+        let hPadding: CGFloat = 12
+        let vPadding: CGFloat = 10
+
+        // Split reactions into two roughly-equal rows; first row gets the
+        // ceiling so an odd count keeps the longer row on top.
+        let total = validReactions.count
+        let firstRowCount = (total + 1) / 2
+        let row1 = Array(validReactions.prefix(firstRowCount))
+        let row2 = Array(validReactions.dropFirst(firstRowCount))
+
+        let outerStack = UIStackView()
+        outerStack.axis = .vertical
+        outerStack.spacing = vSpacing
+        outerStack.alignment = .leading
+        outerStack.translatesAutoresizingMaskIntoConstraints = false
+        pickerVC.view.addSubview(outerStack)
+        NSLayoutConstraint.activate([
+            outerStack.topAnchor.constraint(equalTo: pickerVC.view.topAnchor, constant: vPadding),
+            outerStack.leadingAnchor.constraint(equalTo: pickerVC.view.leadingAnchor, constant: hPadding),
+            // Don't pin trailing/bottom — let the stack size to its intrinsic
+            // content so we can read the real layout size below.
+        ])
+
+        for rowIds in [row1, row2] where !rowIds.isEmpty {
+            let row = UIStackView()
+            row.axis = .horizontal
+            row.spacing = hSpacing
+            row.alignment = .center
+            for reactionId in rowIds {
+                row.addArrangedSubview(makeReactionButton(reactionId: reactionId, size: emojiSize, presenter: pickerVC))
+            }
+            outerStack.addArrangedSubview(row)
+        }
+
+        // Force a layout pass and read the resulting content size — avoids
+        // the bottom row getting clipped when manual math drifts from the
+        // real stack geometry (button insets, baseline alignment, etc.).
+        pickerVC.view.layoutIfNeeded()
+        let fittingSize = outerStack.systemLayoutSizeFitting(
+            UIView.layoutFittingCompressedSize,
+            withHorizontalFittingPriority: .fittingSizeLevel,
+            verticalFittingPriority: .fittingSizeLevel
         )
-        pickerVC.preferredContentSize = pickerSize
+        pickerVC.preferredContentSize = CGSize(
+            width: fittingSize.width + hPadding * 2,
+            height: fittingSize.height + vPadding * 2
+        )
         pickerVC.modalPresentationStyle = .popover
         if let popover = pickerVC.popoverPresentationController {
             popover.sourceView = reactButton
@@ -758,6 +888,47 @@ final class PostNativeCell: UITableViewCell {
             }
             responder = next
         }
+    }
+
+    private func makeReactionButton(reactionId: String, size: CGFloat, presenter: UIViewController) -> UIButton {
+        let button = UIButton(type: .custom)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: size),
+            button.heightAnchor.constraint(equalToConstant: size),
+        ])
+        button.accessibilityLabel = reactionId
+
+        if let urlString = EmojiStore.url(for: reactionId) ?? EmojiStore.lookup(for: reactionId),
+           let url = URL(string: urlString)
+        {
+            let iv = UIImageView()
+            iv.contentMode = .scaleAspectFit
+            iv.translatesAutoresizingMaskIntoConstraints = false
+            iv.sd_setImage(with: url)
+            iv.isUserInteractionEnabled = false
+            button.addSubview(iv)
+            NSLayoutConstraint.activate([
+                iv.topAnchor.constraint(equalTo: button.topAnchor, constant: 2),
+                iv.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -2),
+                iv.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 2),
+                iv.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
+            ])
+        } else {
+            button.setTitle(":\(reactionId):", for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 11)
+            button.setTitleColor(.label, for: .normal)
+        }
+
+        button.addAction(UIAction { [weak self, weak presenter] _ in
+            guard let self, let post = self.currentPost else { return }
+            presenter?.dismiss(animated: true)
+            // Reactions plugin path — every emoji (heart included) goes
+            // through the toggle endpoint, which handles add/remove.
+            self.delegate?.postCell(didTapReaction: reactionId, forPost: post)
+        }, for: .touchUpInside)
+
+        return button
     }
 
     @objc private func boostButtonTapped() {
@@ -822,6 +993,12 @@ final class PostNativeCell: UITableViewCell {
         reactionCountLabel.isHidden = true
         validReactions = []
         let config = Self.symbolConfig
+        cancelUserReactionImageLoad()
+        reactButton.setImage(UIImage(systemName: "heart", withConfiguration: config), for: .normal)
+        reactButton.setTitle(nil, for: .normal)
+        reactButton.tintColor = .tertiaryLabel
+        reactButton.isEnabled = true
+        reactButton.isHidden = false
         boostButton.setImage(UIImage(named: "roket.symbols", in: nil, with: config), for: .normal)
         boostButton.setTitle(nil, for: .normal)
         boostButton.tintColor = .tertiaryLabel

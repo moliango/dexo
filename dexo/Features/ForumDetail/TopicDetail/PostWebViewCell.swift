@@ -9,6 +9,7 @@ protocol PostCellDelegate: AnyObject {
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool)
     func postCell(didTapAvatarForUsername username: String)
     func postCell(didTapReaction reactionId: String, forPost post: DiscourseTopicDetail.Post)
+    func postCell(didToggleLikeForPost post: DiscourseTopicDetail.Post, liked: Bool)
     func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post)
     func postCell(didTapDeleteBoost boost: DiscourseTopicDetail.Boost)
     func postCell(didTapToggleBoostsForPost post: DiscourseTopicDetail.Post, sourceView: UIView)

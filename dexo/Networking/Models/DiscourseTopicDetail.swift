@@ -61,7 +61,30 @@ struct DiscourseTopicDetail: Decodable {
     struct Reaction: Decodable {
         let id: String
         let type: String
-        let count: Int
+        /// Present in the post's `reactions` array; absent in `current_user_reaction`.
+        let count: Int?
+        /// Only meaningful on `current_user_reaction` (whether the user can still toggle off).
+        let canUndo: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case id, type, count
+            case canUndo = "can_undo"
+        }
+    }
+
+    /// One entry in a post's `actions_summary` array. id 2 = "like" (PostAction).
+    struct ActionSummary: Decodable {
+        let id: Int
+        let count: Int?
+        let acted: Bool?
+        let canUndo: Bool?
+        let canAct: Bool?
+
+        enum CodingKeys: String, CodingKey {
+            case id, count, acted
+            case canUndo = "can_undo"
+            case canAct = "can_act"
+        }
     }
 
     struct BoostUser: Decodable, Sendable {
@@ -139,6 +162,12 @@ struct DiscourseTopicDetail: Decodable {
         let reactionUsersCount: Int
         let currentUserReaction: Reaction?
         let currentUserUsedMainReaction: Bool
+        let actionsSummary: [ActionSummary]
+
+        /// Standard Discourse "like" PostAction state (id == 2 in actions_summary).
+        var likeAction: ActionSummary? { actionsSummary.first(where: { $0.id == 2 }) }
+        var isLikedByCurrentUser: Bool { likeAction?.acted == true }
+        var likeCount: Int { likeAction?.count ?? 0 }
         var boosts: [Boost]
         var canBoost: Bool
         var polls: [Poll]
@@ -162,6 +191,7 @@ struct DiscourseTopicDetail: Decodable {
             case reactionUsersCount = "reaction_users_count"
             case currentUserReaction = "current_user_reaction"
             case currentUserUsedMainReaction = "current_user_used_main_reaction"
+            case actionsSummary = "actions_summary"
             case boosts
             case canBoost = "can_boost"
             case polls
@@ -191,6 +221,7 @@ struct DiscourseTopicDetail: Decodable {
             reactionUsersCount = (try? container.decodeIfPresent(Int.self, forKey: .reactionUsersCount)) ?? 0
             currentUserReaction = try? container.decodeIfPresent(Reaction.self, forKey: .currentUserReaction)
             currentUserUsedMainReaction = (try? container.decodeIfPresent(Bool.self, forKey: .currentUserUsedMainReaction)) ?? false
+            actionsSummary = (try? container.decodeIfPresent([ActionSummary].self, forKey: .actionsSummary)) ?? []
             boosts = (try? container.decodeIfPresent([Boost].self, forKey: .boosts)) ?? []
             canBoost = (try? container.decodeIfPresent(Bool.self, forKey: .canBoost)) ?? false
             polls = (try? container.decodeIfPresent([Poll].self, forKey: .polls)) ?? []
