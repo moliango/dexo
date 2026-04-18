@@ -1,6 +1,6 @@
 import UIKit
 
-final class ForumTabBarController: UITabBarController {
+final class ForumTabBarController: UITabBarController, UITabBarControllerDelegate {
     private let api: DiscourseAPI
     private weak var authGate: AuthGating?
     private(set) var navigationControllers: [UINavigationController] = []
@@ -19,6 +19,7 @@ final class ForumTabBarController: UITabBarController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        delegate = self
 
         let homeVC = HomeViewController(api: api, authGate: authGate)
         let homeNav = UINavigationController(rootViewController: homeVC)
@@ -45,5 +46,20 @@ final class ForumTabBarController: UITabBarController {
         } else {
             viewControllers = [homeNav, meNav, searchNav]
         }
+    }
+
+    // MARK: - UITabBarControllerDelegate
+
+    func tabBarController(_ tabBarController: UITabBarController, shouldSelect viewController: UIViewController) -> Bool {
+        // Only act when re-tapping the already-selected home tab at its root
+        guard viewController == selectedViewController,
+              let homeNav = navigationControllers.first,
+              viewController == homeNav,
+              homeNav.viewControllers.count == 1,
+              let homeVC = homeNav.viewControllers.first as? HomeViewController
+        else { return true }
+
+        homeVC.scrollToTopOrRefresh()
+        return false
     }
 }

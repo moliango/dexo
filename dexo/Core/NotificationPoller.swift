@@ -78,7 +78,7 @@ final class NotificationPoller {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             if delay > 0 {
-                try? await Task.sleep(for: .seconds(delay))
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             }
             guard let self, !Task.isCancelled else { return }
 
@@ -90,7 +90,7 @@ final class NotificationPoller {
 
             while !Task.isCancelled, self.isActive {
                 await self.pollMessageBus()
-                try? await Task.sleep(for: .seconds(Self.pollInterval))
+                try? await Task.sleep(nanoseconds: UInt64(Self.pollInterval * 1_000_000_000))
             }
         }
     }

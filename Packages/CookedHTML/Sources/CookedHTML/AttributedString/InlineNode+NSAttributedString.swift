@@ -18,6 +18,7 @@ public struct AttributedStringConfig: Sendable {
     public let mentionColor: UIColor
     public let hashtagColor: UIColor
     public let spoilerColor: UIColor
+    public let lineSpacing: CGFloat
 
     public init(
         baseFont: UIFont = .systemFont(ofSize: 16),
@@ -27,7 +28,8 @@ public struct AttributedStringConfig: Sendable {
         codeBackgroundColor: UIColor = .secondarySystemBackground,
         mentionColor: UIColor = .link,
         hashtagColor: UIColor = .link,
-        spoilerColor: UIColor = .secondarySystemBackground
+        spoilerColor: UIColor = .secondarySystemBackground,
+        lineSpacing: CGFloat = 0
     ) {
         self.baseFont = baseFont
         self.baseColor = baseColor
@@ -37,6 +39,7 @@ public struct AttributedStringConfig: Sendable {
         self.mentionColor = mentionColor
         self.hashtagColor = hashtagColor
         self.spoilerColor = spoilerColor
+        self.lineSpacing = lineSpacing
     }
 }
 
@@ -46,6 +49,11 @@ public extension [InlineNode] {
         let result = NSMutableAttributedString()
         for node in self {
             result.append(node.attributedString(config: config))
+        }
+        if config.lineSpacing > 0, result.length > 0 {
+            let paragraphStyle = NSMutableParagraphStyle()
+            paragraphStyle.lineSpacing = config.lineSpacing
+            result.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: result.length))
         }
         return result
     }

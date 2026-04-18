@@ -133,7 +133,7 @@ final class TagPickerViewController: BaseViewController, UISearchBarDelegate {
 
         searchTask = Task {
             if !query.isEmpty {
-                try? await Task.sleep(for: .milliseconds(300))
+                try? await Task.sleep(nanoseconds: 300_000_000)
                 guard !Task.isCancelled else { return }
             }
             do {

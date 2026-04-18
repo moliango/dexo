@@ -402,6 +402,19 @@ final class HomeViewController: ObservableViewController {
         present(nav, animated: true)
     }
 
+    /// Called when the home tab is re-tapped. Scrolls to top if not already there, otherwise refreshes.
+    func scrollToTopOrRefresh() {
+        let topOffset = -tableView.adjustedContentInset.top
+        if tableView.contentOffset.y <= topOffset + 1 {
+            // Already at top — trigger refresh
+            refreshControl.beginRefreshing()
+            tableView.setContentOffset(CGPoint(x: 0, y: topOffset - refreshControl.frame.height), animated: true)
+            pullToRefresh()
+        } else {
+            tableView.setContentOffset(CGPoint(x: 0, y: topOffset), animated: true)
+        }
+    }
+
     @objc private func loginTapped() {
         authGate?.requireAuth { [weak self] in
             guard let self else { return }
@@ -493,7 +506,18 @@ final class HomeViewController: ObservableViewController {
     }
 }
 
-extension HomeViewController: UITableViewDelegate {
+extension HomeViewController: UITableViewDelegate, UIScrollViewDelegate {
+    private static let refreshTriggerDistance: CGFloat = 40
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView.isDragging, !refreshControl.isRefreshing else { return }
+        let pullDistance = -scrollView.contentOffset.y - scrollView.adjustedContentInset.top
+        if pullDistance > Self.refreshTriggerDistance {
+            refreshControl.beginRefreshing()
+            pullToRefresh()
+        }
+    }
+
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         guard let topicId = dataSource.itemIdentifier(for: indexPath) else { return }

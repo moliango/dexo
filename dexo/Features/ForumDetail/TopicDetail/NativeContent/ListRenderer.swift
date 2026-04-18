@@ -206,6 +206,7 @@ enum ListRenderer: BlockRenderer {
     ) -> NSAttributedString {
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.paragraphSpacing = 4
+        paragraphStyle.lineSpacing = config.baseFont.pointSize * 0.2
         paragraphStyle.headIndent = indent
         paragraphStyle.firstLineHeadIndent = 0
         paragraphStyle.tabStops = [NSTextTab(textAlignment: .left, location: indent, options: [:])]

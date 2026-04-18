@@ -16,7 +16,8 @@ struct NativeRenderConfig {
             baseColor: baseColor,
             linkColor: linkColor,
             codeFont: codeFont,
-            codeBackgroundColor: codeBackgroundColor
+            codeBackgroundColor: codeBackgroundColor,
+            lineSpacing: baseFont.pointSize * 0.2
         )
     }
 
