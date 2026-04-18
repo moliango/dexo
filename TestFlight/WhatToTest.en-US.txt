@@ -6,5 +6,3 @@ What to Test
 - Long press topic cell for preview (Context Menu)
 - Image viewer zoom transition animation
 - Boost danmaku plays after sending a boost
-- Auto-scroll to new post after replying
-- Source code link in Settings
