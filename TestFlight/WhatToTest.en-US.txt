@@ -1,6 +1,5 @@
 What to Test
 
-- Poll rendering: single-choice and multiple-choice polls with vote bars, percentages, and voter count
-- Poll voting: tap to vote (single), select + submit (multiple), remove vote
-- Scroll stability: reduced page jumping when loading more posts
-- Removed WebView snapshot fallback for unsupported content blocks
+- Minimum supported version lowered to iOS 15 (older versions may not load the login page properly)
+- Added font size adjustment
+- Tap the Home tab to scroll to the top; tap again to refresh the list
