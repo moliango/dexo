@@ -26,7 +26,7 @@ let project = Project(
             destinations: .iOS,
             product: .app,
             bundleId: "com.eilgnaw.dexo",
-            deploymentTargets: .iOS("17.0"),
+            deploymentTargets: .iOS("15.0"),
             infoPlist: .file(path: "dexo/Info.plist"),
             sources: [
                 .glob("dexo/**", excluding: [
