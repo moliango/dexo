@@ -11,9 +11,27 @@ final class WebLoginViewController: BaseViewController {
         let config = WKWebViewConfiguration()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
 
+        // Polyfills for iOS < 16.4: CSS.supports override for browser detection,
+        // API polyfills, and static{} block transpilation for Webpack chunks.
+        if #unavailable(iOS 16.4) {
+            let polyfillSource = Self.polyfillJS
+            let script = WKUserScript(source: polyfillSource, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+            config.userContentController.addUserScript(script)
+        }
+
+        // Inject color-scheme hint so the page respects dark mode
+        let darkModeCSS = WKUserScript(
+            source: "document.documentElement.style.colorScheme = 'light dark';",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        config.userContentController.addUserScript(darkModeCSS)
+
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.navigationDelegate = coordinator
         wv.uiDelegate = coordinator
+        wv.isOpaque = false
+        wv.backgroundColor = .systemBackground
         wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
         wv.translatesAutoresizingMaskIntoConstraints = false
         return wv
@@ -94,6 +112,46 @@ final class WebLoginViewController: BaseViewController {
             }
         }
     }
+
+    // MARK: - Polyfills (iOS < 16.4)
+
+    private static let polyfillJS = """
+    (function() {
+        // CSS.supports override — Discourse browser detection
+        var orig = CSS.supports.bind(CSS);
+        CSS.supports = function() {
+            var s = arguments.length === 1 ? arguments[0] : arguments[0] + ':' + arguments[1];
+            if (s.indexOf('subgrid') !== -1 || s.indexOf('hsl(from') !== -1) return true;
+            return orig.apply(CSS, arguments);
+        };
+
+        // structuredClone (iOS 15.4+)
+        if (typeof globalThis.structuredClone === 'undefined') {
+            globalThis.structuredClone = function(obj) { return JSON.parse(JSON.stringify(obj)); };
+        }
+        // Object.hasOwn (iOS 15.4+)
+        if (!Object.hasOwn) {
+            Object.hasOwn = function(obj, prop) { return Object.prototype.hasOwnProperty.call(obj, prop); };
+        }
+        // Array.prototype.at (iOS 15.4+)
+        if (!Array.prototype.at) {
+            Array.prototype.at = function(i) { var n = Math.trunc(i) || 0; if (n < 0) n += this.length; if (n < 0 || n >= this.length) return undefined; return this[n]; };
+        }
+        // String.prototype.at (iOS 15.4+)
+        if (!String.prototype.at) {
+            String.prototype.at = function(i) { var n = Math.trunc(i) || 0; if (n < 0) n += this.length; if (n < 0 || n >= this.length) return undefined; return this[n]; };
+        }
+        // crypto.randomUUID (iOS 15.4+)
+        if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
+            crypto.randomUUID = function() {
+                var a = new Uint8Array(16); crypto.getRandomValues(a);
+                a[6] = (a[6] & 0x0f) | 0x40; a[8] = (a[8] & 0x3f) | 0x80;
+                var h = Array.from(a, function(b) { return b.toString(16).padStart(2,'0'); }).join('');
+                return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+            };
+        }
+    })();
+    """
 
     // MARK: - Coordinator
 
