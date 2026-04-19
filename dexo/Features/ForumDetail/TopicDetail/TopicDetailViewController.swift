@@ -75,6 +75,16 @@ final class TopicDetailViewController: ObservableViewController {
     private var earlierLoadAnchor: (postId: Int, cellTopOffset: CGFloat)?
     /// Cache actual cell heights to avoid jumps from inaccurate estimates
     private var cellHeightCache: [TopicDetailItem: CGFloat] = [:]
+    /// Per-block heights computed by `BlockHeightCalculator`, fed back into
+    /// `cell.configure` so each block view gets an explicit `heightAnchor` and
+    /// the cell skips the Core-Text-typesetting cascade in `systemLayoutSizeFitting`.
+    private var precomputedBlockHeights: [Int: [CGFloat]] = [:]
+    /// Total cell height (chrome + content stack + spacing). Returned directly
+    /// from `heightForRowAt` to bypass `automaticDimension` measurement entirely.
+    private var precomputedTotalHeights: [Int: CGFloat] = [:]
+    /// Tracks the table width the cache was computed against. A width change
+    /// (rotation, split-view resize) invalidates the entire cache.
+    private var precomputedWidth: CGFloat = 0
     private let imageZoomTransition = ImageZoomTransitionDelegate()
     private lazy var boostDanmaku = BoostDanmakuOverlay(hostView: view)
 
@@ -115,6 +125,7 @@ final class TopicDetailViewController: ObservableViewController {
             let isBoostsExpanded = self.viewModel.expandedBoostPostIds.contains(postId)
             let showsSeparator = !isBoostsExpanded
             let cachedViews = self.contentViewCache[postId]
+            self.precomputeHeights(forPostId: postId, blocks: annotatedBlocks, config: config, tableWidth: tableView.bounds.width)
             cell.configure(
                 with: post,
                 annotatedBlocks: annotatedBlocks,
@@ -128,6 +139,7 @@ final class TopicDetailViewController: ObservableViewController {
                 validReactions: self.viewModel.topic?.validReactions ?? [],
                 isBoostsExpanded: isBoostsExpanded,
                 showsSeparator: showsSeparator,
+                precomputedBlockHeights: self.precomputedBlockHeights[postId]
             )
             // Cache newly rendered views for future reuse
             if cachedViews == nil {
@@ -307,6 +319,8 @@ final class TopicDetailViewController: ObservableViewController {
                 suppressLoadEarlier = true
                 cellHeightCache.removeAll()
                 contentViewCache.removeAll()
+                precomputedBlockHeights.removeAll()
+                precomputedTotalHeights.removeAll()
                 await viewModel.jumpToFloor(jumpFloor, containerWidth: view.bounds.width)
             }
         }
@@ -826,6 +840,8 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
             self.suppressLoadEarlier = true
             self.cellHeightCache.removeAll()
             self.contentViewCache.removeAll()
+            self.precomputedBlockHeights.removeAll()
+            self.precomputedTotalHeights.removeAll()
             Task {
                 await self.viewModel.jumpToFloor(floor, containerWidth: self.view.bounds.width)
                 self.hideJumpOverlay()
@@ -860,16 +876,61 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
 
 extension TopicDetailViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
-        UITableView.automaticDimension
+        // Skip systemLayoutSizeFitting entirely when we have a precomputed total
+        // for this post — that's the whole point of BlockHeightCalculator.
+        if case .post(let postId) = dataSource.itemIdentifier(for: indexPath),
+           let precomputed = precomputedTotalHeights[postId]
+        {
+            return precomputed
+        }
+        return UITableView.automaticDimension
     }
 
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        if case .post(let postId) = dataSource.itemIdentifier(for: indexPath),
+           let precomputed = precomputedTotalHeights[postId]
+        {
+            return precomputed
+        }
         if let item = dataSource.itemIdentifier(for: indexPath),
            let cached = cellHeightCache[item]
         {
             return cached
         }
         return 200
+    }
+
+    /// Lazily fills `precomputedBlockHeights` / `precomputedTotalHeights` for a
+    /// post. A width change wipes the entire cache first — block heights are
+    /// width-dependent (text wrapping, image scale).
+    private func precomputeHeights(
+        forPostId postId: Int,
+        blocks: [AnnotatedBlock],
+        config: NativeRenderConfig,
+        tableWidth: CGFloat
+    ) {
+        if tableWidth != precomputedWidth {
+            precomputedBlockHeights.removeAll(keepingCapacity: true)
+            precomputedTotalHeights.removeAll(keepingCapacity: true)
+            precomputedWidth = tableWidth
+        }
+        if precomputedBlockHeights[postId] != nil { return }
+        guard let heights = BlockHeightCalculator.perBlockHeights(annotatedBlocks: blocks, config: config) else {
+            // Unsupported block type in this post — leave cache empty so the cell
+            // falls back to automaticDimension.
+            return
+        }
+        precomputedBlockHeights[postId] = heights
+        let spacing = NativeContentRenderer.contentStackSpacing
+        let contentH = heights.isEmpty ? 0 : heights.reduce(0, +) + CGFloat(heights.count - 1) * spacing
+        precomputedTotalHeights[postId] = PostNativeCell.chromeHeight() + contentH
+    }
+
+    /// Drops cached heights for a post so the next display recomputes them.
+    /// Call after a mutation that may have re-parsed `parsedBlocks`.
+    func invalidatePrecomputedHeights(forPostId postId: Int) {
+        precomputedBlockHeights.removeValue(forKey: postId)
+        precomputedTotalHeights.removeValue(forKey: postId)
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -1047,6 +1108,7 @@ extension TopicDetailViewController: PostCellDelegate {
     private func refreshPost(id: Int) async {
         guard let fresh = try? await api.fetchPost(id: id) else { return }
         viewModel.replacePost(fresh)
+        invalidatePrecomputedHeights(forPostId: id)
         var snapshot = dataSource.snapshot()
         let item = TopicDetailItem.post(id)
         if snapshot.itemIdentifiers.contains(item) {
@@ -1147,6 +1209,8 @@ extension TopicDetailViewController: PostCellDelegate {
             self.earlierLoadAnchor = nil
             self.contentViewCache.removeAll()
             self.cellHeightCache.removeAll()
+            self.precomputedBlockHeights.removeAll()
+            self.precomputedTotalHeights.removeAll()
             // Land the new reply at the bottom of the screen when the
             // jump-target scroll consumes this position.
             self.nextJumpPosition = .bottom
@@ -1324,6 +1388,7 @@ extension TopicDetailViewController: PostCellDelegate {
     }
 
     private func reconfigurePost(_ postId: Int) {
+        invalidatePrecomputedHeights(forPostId: postId)
         var snapshot = dataSource.snapshot()
         let item = TopicDetailItem.post(postId)
         if snapshot.itemIdentifiers.contains(item) {

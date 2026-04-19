@@ -6,6 +6,15 @@ final class PostNativeCell: UITableViewCell {
     static let reuseIdentifier = "PostNativeCell"
     static let headerHeight: CGFloat = 44
     static let bottomBarHeight: CGFloat = 30
+    /// Baseline chrome height wrapping the content stack, for callers that
+    /// precompute `heightForRowAt` instead of going through
+    /// `systemLayoutSizeFitting`. Mirrors the top/bottom constraint constants
+    /// in `setupViews`: 12 (top) + avatar + 12 (gap) on top, 10 + bottomBar +
+    /// 6 + 1 (separator) on bottom.
+    static func chromeHeight() -> CGFloat {
+        let avatarSize = FontManager.shared.scaled(baseAvatarSize)
+        return 24 + avatarSize + 17 + bottomBarHeight
+    }
     private static let symbolConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
 
     // Pre-rendered fallback images so the hot configure / prepareForReuse paths
