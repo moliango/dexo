@@ -10,7 +10,7 @@ final class RawContentViewController: BaseViewController {
         let tv = UITextView()
         tv.isEditable = false
         tv.isSelectable = true
-        tv.font = .monospacedSystemFont(ofSize: 14, weight: .regular)
+        tv.font = FontManager.shared.monospacedFont(size: 16)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.textContainerInset = UIEdgeInsets(top: 16, left: 12, bottom: 16, right: 12)
         return tv
