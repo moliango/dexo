@@ -25,6 +25,18 @@ final class ImageCacheManager {
         emojiCache.config.maxDiskAge = 90 * 24 * 60 * 60       // 90 days
         contentCache.config.maxDiskAge = 3 * 24 * 60 * 60      // 3 days
 
+        // Memory caps. SDImageCache otherwise relies on NSCache + system
+        // memory-pressure heuristics, which let an animated emoji set in a
+        // long topic (~400 unique GIFs × ~475 KiB decoded each = 180+ MiB)
+        // sit in RAM until iOS asks for memory. Hard caps stop the in-memory
+        // working set from tracking the full topic length.
+        emojiCache.config.maxMemoryCost = 30 * 1024 * 1024        // 30 MiB
+        emojiCache.config.maxMemoryCount = 150
+        contentCache.config.maxMemoryCost = 50 * 1024 * 1024      // 50 MiB
+        contentCache.config.maxMemoryCount = 80
+        avatarCache.config.maxMemoryCost = 10 * 1024 * 1024       // 10 MiB
+        avatarCache.config.maxMemoryCount = 200
+
         avatarContext = [.imageCache: avatarCache]
         emojiContext = [.imageCache: emojiCache]
         contentContext = [.imageCache: contentCache]
