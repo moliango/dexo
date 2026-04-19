@@ -117,12 +117,21 @@ enum BlockHeightCalculator {
         case .list(let ordered, let items):
             return listHeight(ordered: ordered, items: items, config: config)
 
-        // Everything else: not yet supported. Caller falls back to autosize.
+        case .video(_, let thumbnailURL, _, let width, let height, _, _):
+            return imageHeight(width: width, height: height, src: thumbnailURL, containerWidth: config.contentWidth)
+
+        case .spoiler(let blocks):
+            return spoilerHeight(blocks: blocks, config: config)
+
+        // Block types whose height we can't yet predict accurately:
+        // - details: expand toggle changes height; needs explicit invalidation
+        // - onebox: layered chrome we haven't measured precisely yet
+        // - table: arbitrarily complex grid layout
+        // - poll: needs per-vote runtime data via pollProvider
+        // - rawHTML: opaque fallback, not safe to precompute
         case .onebox,
-             .video,
              .table,
              .details,
-             .spoiler,
              .poll,
              .rawHTML:
             return nil
@@ -399,6 +408,20 @@ enum BlockHeightCalculator {
         )
         return result
     }
+
+    // MARK: - Spoiler
+
+    /// Mirrors `SpoilerBlockView` — wraps an inner stack (spacing 8) inside a
+    /// blur overlay with `layoutMargins = (4, 0, 4, 0)`. Width is unchanged.
+    private static func spoilerHeight(blocks: [ContentBlock], config: NativeRenderConfig) -> CGFloat? {
+        guard let innerH = nestedStackHeight(for: blocks, config: config, spacing: NativeContentRenderer.contentStackSpacing) else {
+            return nil
+        }
+        return innerH + Self.spoilerVerticalMargins
+    }
+
+    /// 4 (top margin) + 4 (bottom margin)
+    private static let spoilerVerticalMargins: CGFloat = 8
 
     // MARK: - TextKit Helpers
 
