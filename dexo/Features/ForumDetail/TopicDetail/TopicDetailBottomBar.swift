@@ -12,10 +12,10 @@ final class TopicDetailBottomBar: UIView {
 
     private static let buttonSize: CGFloat = 44
 
-    private lazy var scrollToTopButton = makeCircularButton(icon: "arrow.up")
-    private(set) lazy var opOnlyButton = makeCircularButton(icon: "person")
-    private lazy var jumpToFloorButton = makeCircularButton(icon: "number")
-    private lazy var replyButton = makeCircularButton(icon: "arrowshape.turn.up.left")
+    private lazy var scrollToTopButton = makeCircularButton(icon: "arrow.up", a11yLabel: String(localized: "topic.bottombar.scroll_to_top"))
+    private(set) lazy var opOnlyButton = makeCircularButton(icon: "person", a11yLabel: String(localized: "topic.bottombar.op_only"))
+    private lazy var jumpToFloorButton = makeCircularButton(icon: "number", a11yLabel: String(localized: "topic.bottombar.jump_to_floor"))
+    private lazy var replyButton = makeCircularButton(icon: "arrowshape.turn.up.left", a11yLabel: String(localized: "reply.title"))
 
     private lazy var stackView: UIStackView = {
         let sv = UIStackView(arrangedSubviews: [scrollToTopButton, opOnlyButton, jumpToFloorButton, replyButton])
@@ -85,7 +85,7 @@ final class TopicDetailBottomBar: UIView {
 
     // MARK: - Factory
 
-    private func makeCircularButton(icon: String) -> UIButton {
+    private func makeCircularButton(icon: String, a11yLabel: String) -> UIButton {
         let size = Self.buttonSize
         var config = UIButton.Configuration.plain()
         if #available(iOS 26.0, *) {
@@ -100,6 +100,7 @@ final class TopicDetailBottomBar: UIView {
         button.translatesAutoresizingMaskIntoConstraints = false
         button.layer.cornerRadius = size / 2
         button.clipsToBounds = false
+        button.accessibilityLabel = a11yLabel
 
         if #unavailable(iOS 26.0) {
             button.layer.shadowColor = UIColor.black.cgColor

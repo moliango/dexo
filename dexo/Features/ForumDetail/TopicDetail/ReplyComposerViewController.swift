@@ -56,7 +56,9 @@ final class ReplyComposerViewController: BaseViewController {
     }()
 
     private lazy var sendButton: UIBarButtonItem = {
-        UIBarButtonItem(title: String(localized: "reply.send"), style: .done, target: self, action: #selector(sendTapped))
+        let item = UIBarButtonItem(title: String(localized: "reply.send"), style: .done, target: self, action: #selector(sendTapped))
+        item.accessibilityLabel = String(localized: "reply.send")
+        return item
     }()
 
     private lazy var sendSpinner: UIBarButtonItem = {
@@ -85,7 +87,9 @@ final class ReplyComposerViewController: BaseViewController {
             title = String(localized: "reply.title")
         }
 
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: String(localized: "action.cancel"), style: .plain, target: self, action: #selector(cancelTapped))
+        let cancelItem = UIBarButtonItem(title: String(localized: "action.cancel"), style: .plain, target: self, action: #selector(cancelTapped))
+        cancelItem.accessibilityLabel = String(localized: "action.cancel")
+        navigationItem.leftBarButtonItem = cancelItem
         navigationItem.rightBarButtonItem = sendButton
         updateSendButton()
 

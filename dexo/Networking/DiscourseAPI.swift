@@ -459,10 +459,6 @@ final class DiscourseAPI {
             .serializingDecodable(T.self)
             .response
 
-        if let data = response.data, let body = String(data: data, encoding: .utf8) {
-//            debugLog("[DiscourseAPI] \(route.method.rawValue) \(url)\n\(body)")
-        }
-
         if let newToken = response.response?.value(forHTTPHeaderField: "X-CSRF-Token") {
             interceptor.updateCSRFToken(newToken)
         }
@@ -541,11 +537,11 @@ struct DiscourseAPIError: LocalizedError {
 private final class DiscourseAuthInterceptor: RequestInterceptor {
     private let baseURL: String
     private nonisolated(unsafe) var csrfToken: String?
-    private var isFetchingCSRF = false
-    private var csrfWaiters: [(String?) -> Void] = []
+    private nonisolated(unsafe) var isFetchingCSRF = false
+    private nonisolated(unsafe) var csrfWaiters: [(String?) -> Void] = []
     private let csrfLock = NSLock()
 
-    private var authChangeObserver: (any NSObjectProtocol)?
+    private nonisolated(unsafe) var authChangeObserver: (any NSObjectProtocol)?
 
     init(baseURL: String) {
         self.baseURL = baseURL

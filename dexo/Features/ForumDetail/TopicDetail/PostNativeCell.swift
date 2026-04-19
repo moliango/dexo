@@ -287,6 +287,11 @@ final class PostNativeCell: UITableViewCell {
         contentView.addSubview(replyButton)
         contentView.addSubview(separatorLine)
 
+        replyButton.accessibilityLabel = String(localized: "reply.title")
+        moreButton.accessibilityLabel = String(localized: "action.more")
+        reactButton.accessibilityLabel = String(localized: "post.a11y.like")
+        boostButton.accessibilityLabel = String(localized: "post.a11y.boost")
+
         avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
         avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
         flairWidthConstraint = flairImageView.widthAnchor.constraint(equalToConstant: Self.baseFlairSize)
@@ -515,6 +520,11 @@ final class PostNativeCell: UITableViewCell {
         // and no reactions plugin to provide the affordance.
         reactButton.isHidden = !canAct && !liked && likeCount == 0 && !reactionsPluginActive
 
+        reactButton.accessibilityLabel = liked
+            ? String(localized: "post.a11y.liked")
+            : String(localized: "post.a11y.like")
+        reactButton.accessibilityValue = likeCount > 0 ? "\(likeCount)" : nil
+
         // Boost
         let boostCount = post.boosts.count
         let hasMine = post.boosts.contains { $0.canDelete == true }
@@ -527,6 +537,7 @@ final class PostNativeCell: UITableViewCell {
         // inspect/delete theirs) even though `canBoost` is false in that case.
         boostButton.isHidden = !post.canBoost && boostCount == 0
         boostButton.isEnabled = post.canBoost || boostCount > 0
+        boostButton.accessibilityValue = boostCount > 0 ? "\(boostCount)" : nil
 
         // More menu (copy link, bookmark, flag)
         updateMoreMenu()
@@ -932,7 +943,7 @@ final class PostNativeCell: UITableViewCell {
             button.widthAnchor.constraint(equalToConstant: size),
             button.heightAnchor.constraint(equalToConstant: size),
         ])
-        button.accessibilityLabel = reactionId
+        button.accessibilityLabel = String(localized: "post.a11y.reaction \(reactionId)")
 
         if let urlString = EmojiStore.url(for: reactionId) ?? EmojiStore.lookup(for: reactionId),
            let url = URL(string: urlString)

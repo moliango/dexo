@@ -72,6 +72,9 @@ final class TopicCell: UITableViewCell {
         contentView.addSubview(categoryLabel)
         contentView.addSubview(timeLabel)
 
+        isAccessibilityElement = true
+        accessibilityTraits = .button
+
         avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
         avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
 
@@ -146,6 +149,14 @@ final class TopicCell: UITableViewCell {
         } else {
             avatarImageView.image = nil
         }
+
+        let repliesText = String(localized: "topic.cell.a11y.replies \(replies)")
+        let parts = [topic.title, categoryName, repliesText, timeLabel.text]
+            .compactMap { (s: String?) -> String? in
+                guard let s, !s.isEmpty else { return nil }
+                return s
+            }
+        accessibilityLabel = parts.joined(separator: ", ")
     }
 
     override func prepareForReuse() {
