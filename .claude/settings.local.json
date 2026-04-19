@@ -25,7 +25,22 @@
       "Bash(make generate:*)",
       "Bash(find:*)",
       "Bash(xargs cat:*)",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "mcp__xcodebuildmcp__list_schemes",
+      "mcp__xcodebuildmcp__list_sims",
+      "mcp__xcodebuildmcp__session_set_defaults",
+      "mcp__xcodebuildmcp__build_sim",
+      "mcp__xcodebuildmcp__clean",
+      "mcp__xcodebuildmcp__build_run_sim",
+      "mcp__xcodebuildmcp__snapshot_ui",
+      "Bash(axe tap *)",
+      "mcp__xcodebuildmcp__screenshot",
+      "Bash(axe screenshot *)",
+      "Bash(axe describe-ui *)",
+      "Bash(axe type *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "xcodebuildmcp"
+  ]
 }
