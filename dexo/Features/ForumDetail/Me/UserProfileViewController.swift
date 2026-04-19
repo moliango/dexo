@@ -52,10 +52,41 @@ final class UserProfileViewController: ObservableViewController {
         profileHeader.onStatTapped = { [weak self] statType in
             self?.handleStatTapped(statType)
         }
+        profileHeader.onMessageTapped = { [weak self] in
+            self?.handleMessageTapped()
+        }
 
         Task {
             await viewModel.load()
         }
+    }
+
+    private func handleMessageTapped() {
+        if viewModel.isOwnProfile {
+            guard let authGate = findAuthGating() else { return }
+            authGate.requireAuth { [weak self] in
+                guard let self else { return }
+                let vc = MessagesViewController(api: self.api, authGate: authGate)
+                self.navigationController?.pushViewController(vc, animated: true)
+            }
+        } else {
+            presentMessageComposer()
+        }
+    }
+
+    private func findAuthGating() -> AuthGating? {
+        var vc: UIViewController? = self
+        while let parent = vc?.parent {
+            if let gate = parent as? AuthGating { return gate }
+            for child in parent.children {
+                if let gate = child as? AuthGating { return gate }
+                for grandchild in child.children {
+                    if let gate = grandchild as? AuthGating { return gate }
+                }
+            }
+            vc = parent
+        }
+        return nil
     }
 
     override func updateUI() {
@@ -141,21 +172,6 @@ final class UserProfileViewController: ObservableViewController {
         present(alert, animated: true)
     }
 
-    private func followUser() {
-        Task {
-            do {
-                try await api.followUser(username: viewModel.username)
-                let alert = UIAlertController(title: nil, message: String(localized: "user.followed \(viewModel.username)"), preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
-                present(alert, animated: true)
-            } catch {
-                let alert = UIAlertController(title: nil, message: error.localizedDescription, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
-                present(alert, animated: true)
-            }
-        }
-    }
-
     // MARK: - Stat Taps
 
     private func handleStatTapped(_ statType: ProfileHeaderView.StatType) {
@@ -175,69 +191,34 @@ final class UserProfileViewController: ObservableViewController {
 // MARK: - UITableViewDataSource
 
 extension UserProfileViewController: UITableViewDataSource {
-    private enum Section: Int {
-        case actions = 0
-        case content = 1
-    }
-
     func numberOfSections(in tableView: UITableView) -> Int {
         guard viewModel.userProfile != nil else { return 0 }
-        return viewModel.isOwnProfile ? 1 : 2
+        return 1
     }
 
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         guard viewModel.userProfile != nil else { return 0 }
-        if viewModel.isOwnProfile {
-            return 2 // content only
-        }
-        switch Section(rawValue: section) {
-        case .actions:
-            return viewModel.canSendMessage ? 2 : 1
-        case .content:
-            return 2
-        default:
-            return 0
-        }
+        return 2
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let effectiveSection: Section = viewModel.isOwnProfile ? .content : Section(rawValue: indexPath.section) ?? .content
-
-        switch effectiveSection {
-        case .actions:
-            let cell = UITableViewCell()
-            var content = cell.defaultContentConfiguration()
-            if indexPath.row == 0, viewModel.canSendMessage {
-                content.image = UIImage(systemName: "envelope")
-                content.text = String(localized: "user.send_message")
-                content.imageProperties.tintColor = .tintColor
-            } else {
-                content.image = UIImage(systemName: "person.badge.plus")
-                content.text = String(localized: "user.follow")
-                content.imageProperties.tintColor = .tintColor
-            }
-            cell.contentConfiguration = content
-            cell.accessoryType = .disclosureIndicator
-            return cell
-        case .content:
-            let cell = UITableViewCell()
-            var content = cell.defaultContentConfiguration()
-            switch indexPath.row {
-            case 0:
-                content.image = UIImage(systemName: "text.bubble")
-                content.text = String(localized: "user.topics_title")
-                content.imageProperties.tintColor = .tintColor
-            case 1:
-                content.image = UIImage(systemName: "text.quote")
-                content.text = String(localized: "user.posts_title")
-                content.imageProperties.tintColor = .tintColor
-            default:
-                break
-            }
-            cell.contentConfiguration = content
-            cell.accessoryType = .disclosureIndicator
-            return cell
+        let cell = UITableViewCell()
+        var content = cell.defaultContentConfiguration()
+        switch indexPath.row {
+        case 0:
+            content.image = UIImage(systemName: "text.bubble")
+            content.text = String(localized: "user.topics_title")
+        case 1:
+            content.image = UIImage(systemName: "text.quote")
+            content.text = String(localized: "user.posts_title")
+        default:
+            break
         }
+        content.imageProperties.tintColor = .tintColor
+        content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 16, weight: .regular)
+        cell.contentConfiguration = content
+        cell.accessoryType = .disclosureIndicator
+        return cell
     }
 }
 
@@ -247,26 +228,15 @@ extension UserProfileViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
 
-        let effectiveSection: Section = viewModel.isOwnProfile ? .content : Section(rawValue: indexPath.section) ?? .content
-
-        switch effectiveSection {
-        case .actions:
-            if indexPath.row == 0, viewModel.canSendMessage {
-                presentMessageComposer()
-            } else {
-                followUser()
-            }
-        case .content:
-            switch indexPath.row {
-            case 0:
-                let vc = UserPostsViewController(api: api, username: viewModel.username, filter: .topics)
-                navigationController?.pushViewController(vc, animated: true)
-            case 1:
-                let vc = UserPostsViewController(api: api, username: viewModel.username, filter: .posts)
-                navigationController?.pushViewController(vc, animated: true)
-            default:
-                break
-            }
+        switch indexPath.row {
+        case 0:
+            let vc = UserPostsViewController(api: api, username: viewModel.username, filter: .topics)
+            navigationController?.pushViewController(vc, animated: true)
+        case 1:
+            let vc = UserPostsViewController(api: api, username: viewModel.username, filter: .posts)
+            navigationController?.pushViewController(vc, animated: true)
+        default:
+            break
         }
     }
 }

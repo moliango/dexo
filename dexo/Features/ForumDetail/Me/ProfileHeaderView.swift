@@ -1,3 +1,4 @@
+import CookedHTML
 import SDWebImage
 import UIKit
 
@@ -11,6 +12,9 @@ final class ProfileHeaderView: UIView {
 
     var onLoginTapped: (() -> Void)?
     var onStatTapped: ((StatType) -> Void)?
+    /// Invoked when the message button on the stats row is tapped.
+    /// Own profile → navigate to the DM inbox; other profile → compose a new DM.
+    var onMessageTapped: (() -> Void)?
 
     private static let baseAvatarSize: CGFloat = 50
     private var avatarWidthConstraint: NSLayoutConstraint!
@@ -71,10 +75,34 @@ final class ProfileHeaderView: UIView {
     private let statsStackView: UIStackView = {
         let sv = UIStackView()
         sv.axis = .horizontal
-        sv.distribution = .fillEqually
-        sv.spacing = 8
+        sv.distribution = .fill
+        sv.alignment = .center
+        sv.spacing = 14
         sv.translatesAutoresizingMaskIntoConstraints = false
         return sv
+    }()
+
+    private lazy var messageButton: UIButton = {
+        var config = UIButton.Configuration.tinted()
+        let symbol = UIImage.SymbolConfiguration(pointSize: 11, weight: .regular)
+        config.image = UIImage(systemName: "envelope", withConfiguration: symbol)
+        config.imagePadding = 5
+        config.title = String(localized: "me.messages")
+        config.cornerStyle = .capsule
+        config.contentInsets = NSDirectionalEdgeInsets(top: 5, leading: 11, bottom: 5, trailing: 13)
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var out = incoming
+            out.font = FontManager.shared.font(size: 12, weight: .semibold)
+            return out
+        }
+        let button = UIButton(configuration: config)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.required, for: .horizontal)
+        button.addAction(UIAction { [weak self] _ in
+            self?.onMessageTapped?()
+        }, for: .touchUpInside)
+        return button
     }()
 
     // Login prompt state
@@ -165,14 +193,17 @@ final class ProfileHeaderView: UIView {
             avatarWidthConstraint,
             avatarHeightConstraint,
 
+            // Horizontal insets align with the `.insetGrouped` cell content start
+            // (section inset 20pt + cell layout margin ~12pt), using
+            // `safeAreaLayoutGuide` for iPad split-view / landscape safety.
             loggedInContainer.topAnchor.constraint(equalTo: topAnchor, constant: 24),
-            loggedInContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            loggedInContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            loggedInContainer.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 32),
+            loggedInContainer.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -32),
             loggedInContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
 
             loggedOutContainer.topAnchor.constraint(equalTo: topAnchor, constant: 40),
-            loggedOutContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            loggedOutContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            loggedOutContainer.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 32),
+            loggedOutContainer.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -32),
             loggedOutContainer.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -24),
 
             statsStackView.leadingAnchor.constraint(equalTo: loggedInContainer.leadingAnchor),
@@ -209,8 +240,10 @@ final class ProfileHeaderView: UIView {
                 titleLabel.isHidden = true
             }
 
-            if let bio = userProfile?.bioExcerpt, !bio.isEmpty {
-                bioLabel.text = bio
+            if let cooked = userProfile?.bioCooked, !cooked.isEmpty,
+               let attr = Self.renderBio(cooked: cooked), attr.length > 0
+            {
+                bioLabel.attributedText = attr
                 bioLabel.isHidden = false
             } else {
                 bioLabel.isHidden = true
@@ -243,40 +276,51 @@ final class ProfileHeaderView: UIView {
     }
 
     private func configureStats(summary: DiscourseUserSummary?) {
-        statsStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-        guard let summary else { return }
-
-        let items: [(String, Int, StatType)] = [
-            (String(localized: "me.stats.topics"), summary.topicCount, .topics),
-            (String(localized: "me.stats.posts"), summary.postCount, .posts),
-            (String(localized: "me.stats.likes"), summary.likesReceived, .likes),
-            (String(localized: "me.stats.days"), summary.daysVisited, .days),
-        ]
-
-        for (label, value, statType) in items {
-            let statView = createStatView(title: label, value: value, statType: statType)
-            statsStackView.addArrangedSubview(statView)
+        statsStackView.arrangedSubviews.forEach {
+            statsStackView.removeArrangedSubview($0)
+            $0.removeFromSuperview()
         }
+
+        if let summary {
+            let items: [(String, Int, StatType)] = [
+                (String(localized: "me.stats.topics"), summary.topicCount, .topics),
+                (String(localized: "me.stats.posts"), summary.postCount, .posts),
+                (String(localized: "me.stats.likes"), summary.likesReceived, .likes),
+            ]
+
+            for (label, value, statType) in items {
+                let statView = createStatView(title: label, value: value, statType: statType)
+                statsStackView.addArrangedSubview(statView)
+            }
+        }
+
+        // Spacer pushes the message button to the right edge regardless of stat width.
+        let spacer = UIView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        spacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statsStackView.addArrangedSubview(spacer)
+        statsStackView.addArrangedSubview(messageButton)
     }
 
     private func createStatView(title: String, value: Int, statType: StatType) -> UIView {
         let container = UIStackView()
         container.axis = .vertical
         container.alignment = .center
-        container.spacing = 2
+        container.spacing = 1
         container.isUserInteractionEnabled = true
         container.tag = statType.rawValue
+        container.setContentHuggingPriority(.required, for: .horizontal)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(statTapped(_:)))
         container.addGestureRecognizer(tap)
 
         let valueLabel = UILabel()
-        valueLabel.font = FontManager.shared.font(size: 18, weight: .bold)
+        valueLabel.font = FontManager.shared.font(size: 15, weight: .bold)
         valueLabel.text = "\(value)"
         valueLabel.textAlignment = .center
 
         let titleLabel = UILabel()
-        titleLabel.font = FontManager.shared.font(size: 12)
+        titleLabel.font = FontManager.shared.font(size: 10)
         titleLabel.textColor = .secondaryLabel
         titleLabel.text = title
         titleLabel.textAlignment = .center
@@ -294,5 +338,24 @@ final class ProfileHeaderView: UIView {
 
     @objc private func loginTapped() {
         onLoginTapped?()
+    }
+
+    private static func renderBio(cooked: String) -> NSAttributedString? {
+        let blocks = CookedHTMLParser.parse(html: cooked)
+        let config = AttributedStringConfig(
+            baseFont: FontManager.shared.font(size: 14),
+            baseColor: .secondaryLabel,
+            codeFont: FontManager.shared.monospacedFont(size: 13),
+            codeBackgroundColor: ThemeManager.shared.codeBackgroundColor
+        )
+        let result = NSMutableAttributedString()
+        for block in blocks {
+            guard case .paragraph(let inlines) = block else { continue }
+            if result.length > 0 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+            result.append(inlines.attributedString(config: config))
+        }
+        return result.length > 0 ? result : nil
     }
 }

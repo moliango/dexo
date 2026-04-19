@@ -1,7 +1,7 @@
 import UIKit
 
 /// Skeleton placeholder shown while the Me profile is loading.
-/// Mimics the layout of ProfileHeaderView + 3 table rows.
+/// Mimics the layout of ProfileHeaderView + 2 table rows.
 final class MeSkeletonView: UIView {
     private var shimmers: [ShimmerView] = []
 
@@ -69,8 +69,8 @@ final class MeSkeletonView: UIView {
         rowsStack.spacing = 0
         rowsStack.translatesAutoresizingMaskIntoConstraints = false
 
-        for i in 0..<3 {
-            let icon = makeShimmer(height: 20, width: 20, radius: 4)
+        for i in 0..<2 {
+            let icon = makeShimmer(height: 16, width: 16, radius: 4)
             let label = makeShimmer(height: 14)
             let row = UIStackView(arrangedSubviews: [icon, label])
             row.axis = .horizontal
@@ -88,7 +88,7 @@ final class MeSkeletonView: UIView {
                 row.bottomAnchor.constraint(equalTo: rowContainer.bottomAnchor, constant: -14),
             ])
 
-            if i < 2 {
+            if i < 1 {
                 let sep = UIView()
                 sep.backgroundColor = .separator
                 sep.translatesAutoresizingMaskIntoConstraints = false
@@ -115,12 +115,12 @@ final class MeSkeletonView: UIView {
 
         NSLayoutConstraint.activate([
             headerStack.topAnchor.constraint(equalTo: topAnchor, constant: 24),
-            headerStack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            headerStack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            headerStack.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 32),
+            headerStack.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -32),
 
             rowsCard.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 28),
-            rowsCard.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 20),
-            rowsCard.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -20),
+            rowsCard.leadingAnchor.constraint(equalTo: safeAreaLayoutGuide.leadingAnchor, constant: 20),
+            rowsCard.trailingAnchor.constraint(equalTo: safeAreaLayoutGuide.trailingAnchor, constant: -20),
 
             rowsStack.topAnchor.constraint(equalTo: rowsCard.topAnchor),
             rowsStack.leadingAnchor.constraint(equalTo: rowsCard.leadingAnchor),

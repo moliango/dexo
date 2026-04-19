@@ -34,16 +34,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
             indicator.startAnimating()
             return indicator
         }
-        LightboxConfig.PageIndicator.separatorColor = .clear
-        LightboxConfig.PageIndicator.textAttributes = [
-            .font: UIFont.systemFont(ofSize: 17, weight: .semibold),
-            .foregroundColor: UIColor.white,
-            .paragraphStyle: {
-                let style = NSMutableParagraphStyle()
-                style.alignment = .center
-                return style
-            }(),
-        ]
+        // ImageBrowserController draws its own dot-style page indicator.
+        LightboxConfig.PageIndicator.enabled = false
 
         return true
     }

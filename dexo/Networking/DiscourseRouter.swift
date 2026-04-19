@@ -67,11 +67,12 @@ enum DiscourseRouter {
         case .categories:
             return "/categories.json?include_subcategories=true"
         case .topic(let id, let nearPostNumber):
-            // `near_post_number=N` asks Discourse to return the first batch of posts
-            // centered on floor N instead of starting from post 1. Used for deep-link
-            // entry so we avoid fetching + parsing the OP batch just to throw it away.
+            // `/t/{id}/{N}.json` returns a batch of posts ending at floor N — used
+            // for deep-link entry (notification tap, reply jump) so we avoid
+            // fetching the OP batch just to throw it away. `track_visit` updates
+            // read state; `forceLoad` bypasses cache so a just-created reply shows.
             if let nearPostNumber, nearPostNumber > 1 {
-                return "/t/\(id).json?near_post_number=\(nearPostNumber)"
+                return "/t/\(id)/\(nearPostNumber).json?track_visit=true&forceLoad=true"
             }
             return "/t/\(id).json"
         case .topicPosts(let topicId, let postIds):

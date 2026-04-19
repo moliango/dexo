@@ -143,6 +143,13 @@ final class TopicDetailViewModel {
                 jumpTargetFloor = nearPostNumber
             }
 
+            // Force updateUI to re-run even if isReady was already true.
+            // Upstream mutations (topic, parsedBlocks, etc.) only fire the first
+            // tracked change per observation cycle; re-assigning isReady guarantees
+            // a final fire after all state is settled.
+            if isReady {
+                isReady = false
+            }
             isReady = true
         } catch {
             debugLog("[TopicDetail] Load failed: \(error)")

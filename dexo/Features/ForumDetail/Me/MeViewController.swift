@@ -76,6 +76,16 @@ final class MeViewController: ObservableViewController {
             self?.handleStatTapped(statType)
         }
 
+        profileHeader.onMessageTapped = { [weak self] in
+            guard let self, let authGate = self.authGate else { return }
+            authGate.requireAuth { [weak self] in
+                guard let self else { return }
+                self.notificationPoller?.clearMessages()
+                let vc = MessagesViewController(api: self.api, authGate: authGate)
+                self.navigationController?.pushViewController(vc, animated: true)
+            }
+        }
+
         let isLoggedIn = authGate?.isAuthenticated() ?? false
         if isLoggedIn {
             skeletonView.isHidden = false
@@ -236,7 +246,7 @@ extension MeViewController: UITableViewDataSource {
         switch section {
         case 0:
             let isLoggedIn = authGate?.isAuthenticated() ?? false
-            return isLoggedIn ? 3 : 0
+            return isLoggedIn ? 2 : 0
         case 1:
             return 1
         default:
@@ -252,20 +262,17 @@ extension MeViewController: UITableViewDataSource {
             var showDot = false
             switch indexPath.row {
             case 0:
-                content.image = UIImage(systemName: "bell.fill")
+                content.image = UIImage(systemName: "bell")
                 content.text = String(localized: "me.notifications")
                 showDot = notificationPoller?.hasUnreadNotifications ?? false
             case 1:
-                content.image = UIImage(systemName: "envelope.fill")
-                content.text = String(localized: "me.messages")
-                showDot = notificationPoller?.hasUnreadMessages ?? false
-            case 2:
-                content.image = UIImage(systemName: "bookmark.fill")
+                content.image = UIImage(systemName: "bookmark")
                 content.text = String(localized: "me.bookmarks")
             default:
                 break
             }
             content.imageProperties.tintColor = .tintColor
+            content.imageProperties.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 16, weight: .regular)
             cell.contentConfiguration = content
             cell.accessoryType = .disclosureIndicator
 
@@ -311,10 +318,6 @@ extension MeViewController: UITableViewDelegate {
                 let vc = NotificationsViewController(api: api, authGate: authGate)
                 navigationController?.pushViewController(vc, animated: true)
             case 1:
-                notificationPoller?.clearMessages()
-                let vc = MessagesViewController(api: api, authGate: authGate)
-                navigationController?.pushViewController(vc, animated: true)
-            case 2:
                 guard let username = viewModel.currentUser?.username else { return }
                 let vc = BookmarksViewController(api: api, username: username)
                 navigationController?.pushViewController(vc, animated: true)

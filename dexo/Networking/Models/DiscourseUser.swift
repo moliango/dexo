@@ -41,7 +41,7 @@ struct DiscourseUserProfile: Decodable {
     let profileViewCount: Int?
     let timeRead: Int?
     let createdAt: String?
-    let bioExcerpt: String?
+    let bioCooked: String?
     let flairName: String?
     let flairUrl: String?
     let canSendPrivateMessageToUser: Bool?
@@ -54,7 +54,7 @@ struct DiscourseUserProfile: Decodable {
         case profileViewCount = "profile_view_count"
         case timeRead = "time_read"
         case createdAt = "created_at"
-        case bioExcerpt = "bio_excerpt"
+        case bioCooked = "bio_cooked"
         case flairName = "flair_name"
         case flairUrl = "flair_url"
         case canSendPrivateMessageToUser = "can_send_private_message_to_user"

@@ -17,6 +17,22 @@
         }
       }
     },
+    "action.close" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Close"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
     "action.delete" : {
       "localizations" : {
         "en" : {
@@ -1193,6 +1209,7 @@
       }
     },
     "me.stats.days" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3007,6 +3024,7 @@
       }
     },
     "user.follow" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3023,6 +3041,7 @@
       }
     },
     "user.followed %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

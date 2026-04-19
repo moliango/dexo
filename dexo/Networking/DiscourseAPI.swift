@@ -460,7 +460,7 @@ final class DiscourseAPI {
             .response
 
         if let data = response.data, let body = String(data: data, encoding: .utf8) {
-            debugLog("[DiscourseAPI] \(route.method.rawValue) \(url)\n\(body)")
+//            debugLog("[DiscourseAPI] \(route.method.rawValue) \(url)\n\(body)")
         }
 
         if let newToken = response.response?.value(forHTTPHeaderField: "X-CSRF-Token") {
@@ -540,7 +540,7 @@ struct DiscourseAPIError: LocalizedError {
 
 private final class DiscourseAuthInterceptor: RequestInterceptor {
     private let baseURL: String
-    nonisolated(unsafe) private var csrfToken: String?
+    private nonisolated(unsafe) var csrfToken: String?
     private var isFetchingCSRF = false
     private var csrfWaiters: [(String?) -> Void] = []
     private let csrfLock = NSLock()
