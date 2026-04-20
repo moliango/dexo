@@ -240,21 +240,17 @@ enum BlockHeightCalculator {
 
     // MARK: - Code Block
 
-    /// Mirrors `CodeBlockRenderer`. The code view height is clamped to
-    /// `maxVisibleLines` lines of `codeFont.lineHeight`. Fixed chrome around
-    /// the code view: top 4 + header 26 + 2 + (codeHeight) + bottom 12.
+    /// Mirrors `CodeBlockRenderer`. Delegates per-line-count height to the
+    /// renderer's TextKit measurement so the cell height and the actual code
+    /// view stay in sync — the old `font.lineHeight * lines` estimate
+    /// underestimated for some fonts and caused short blocks to scroll.
     private static func codeBlockHeight(code: String, config: NativeRenderConfig) -> CGFloat {
-        var newlineCount = 0
-        for ch in code.unicodeScalars where ch == "\n" { newlineCount += 1 }
-        let lineCount = newlineCount + 1
-        let visibleLines = min(lineCount, Self.codeMaxVisibleLines)
-        let codeHeight = ceil(config.codeFont.lineHeight * CGFloat(visibleLines)) + 6
+        let codeHeight = CodeBlockRenderer.measureCodeHeight(code: code, font: config.codeFont)
         return Self.codeChromeHeight + codeHeight
     }
 
     /// 4 (top) + 26 (header copy button) + 2 (gap to code) + 12 (bottom) = 44
     private static let codeChromeHeight: CGFloat = 44
-    private static let codeMaxVisibleLines = 20
 
     // MARK: - Blockquote
 

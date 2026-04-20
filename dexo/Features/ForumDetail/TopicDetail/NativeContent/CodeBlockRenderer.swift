@@ -82,12 +82,7 @@ enum CodeBlockRenderer: BlockRenderer {
         ])
         container.addSubview(codeView)
 
-        // Count newlines cheaply (no array allocation) and clamp at the visible cap.
-        var newlineCount = 0
-        for ch in code.unicodeScalars where ch == "\n" { newlineCount += 1 }
-        let lineCount = newlineCount + 1
-        let visibleLines = min(lineCount, Self.maxVisibleLines)
-        let codeHeight = ceil(config.codeFont.lineHeight * CGFloat(visibleLines)) + 6
+        let codeHeight = Self.measureCodeHeight(code: code, font: config.codeFont)
 
         NSLayoutConstraint.activate([
             headerStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 4),
@@ -105,7 +100,39 @@ enum CodeBlockRenderer: BlockRenderer {
     }
 
     /// Upper bound on the visible code rows — anything longer scrolls inside the box.
-    private static let maxVisibleLines = 20
+    static let maxVisibleLines = 20
+
+    /// Measured height of the code view (inner scroll area, no header chrome).
+    /// For blocks ≤ `maxVisibleLines` we measure the real code via TextKit,
+    /// since `font.lineHeight × lines` underestimates the rendered
+    /// line-fragment height for some fonts / scripts and was forcing short
+    /// blocks into vertical scroll. Longer blocks measure a synthetic
+    /// `maxVisibleLines`-line sample so we don't pay full layout of huge pastes
+    /// but still get a height that matches how TextKit will render.
+    static func measureCodeHeight(code: String, font: UIFont) -> CGFloat {
+        var newlineCount = 0
+        for ch in code.unicodeScalars where ch == "\n" { newlineCount += 1 }
+        let lineCount = newlineCount + 1
+
+        let source: String
+        if lineCount <= maxVisibleLines {
+            source = code
+        } else {
+            source = String(repeating: "X\n", count: maxVisibleLines - 1) + "X"
+        }
+
+        let storage = NSTextStorage(string: source, attributes: [.font: font])
+        let manager = NSLayoutManager()
+        let container = NSTextContainer(size: CGSize(
+            width: CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        ))
+        container.lineFragmentPadding = 0
+        manager.addTextContainer(container)
+        storage.addLayoutManager(manager)
+        manager.ensureLayout(for: container)
+        return ceil(manager.usedRect(for: container).height) + 2
+    }
 }
 
 // MARK: - Copy Button
