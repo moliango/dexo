@@ -15,22 +15,18 @@ enum SpoilerRenderer: BlockRenderer {
 
 // MARK: - SpoilerOverlayView
 
-/// Reusable blur overlay that wraps any content view with tap-to-reveal spoiler effect.
-/// Used by SpoilerBlockView (block-level), TableRenderer (spoiler images in cells),
-/// and any other context that needs to blur arbitrary content.
+/// Reusable blur overlay that wraps any content view with tap-to-toggle spoiler effect.
+/// The blur effect itself is installed once at full intensity; reveal/hide is done by
+/// animating `blurView.alpha` so the effect never snaps (animating `UIVisualEffectView.effect`
+/// via UIView.animate is unreliable on iOS and was the cause of the reveal-then-flash bug).
 class SpoilerOverlayView: UIView {
     private let blurView: UIVisualEffectView
-    private var blurAnimator: UIViewPropertyAnimator?
     private let contentView: UIView
     private var isRevealed = false
 
-    /// How much of the blur to apply (0 = none, 1 = full).
-    private let blurFraction: CGFloat
-
-    init(contentView: UIView, cornerRadius: CGFloat = 0, blurFraction: CGFloat = 0.55) {
+    init(contentView: UIView, cornerRadius: CGFloat = 0, blurStyle: UIBlurEffect.Style = .systemThinMaterial) {
         self.contentView = contentView
-        self.blurFraction = blurFraction
-        blurView = UIVisualEffectView(effect: nil)
+        blurView = UIVisualEffectView(effect: UIBlurEffect(style: blurStyle))
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
         clipsToBounds = true
@@ -40,7 +36,6 @@ class SpoilerOverlayView: UIView {
         addSubview(contentView)
 
         blurView.translatesAutoresizingMaskIntoConstraints = false
-        blurView.isUserInteractionEnabled = false
         addSubview(blurView)
 
         NSLayoutConstraint.activate([
@@ -56,9 +51,8 @@ class SpoilerOverlayView: UIView {
         ])
 
         contentView.isUserInteractionEnabled = false
-        applyPartialBlur()
 
-        let tap = UITapGestureRecognizer(target: self, action: #selector(toggleReveal))
+        let tap = UITapGestureRecognizer(target: self, action: #selector(toggle))
         addGestureRecognizer(tap)
     }
 
@@ -67,46 +61,12 @@ class SpoilerOverlayView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit {
-        cleanUpAnimator()
-    }
-
-    private func cleanUpAnimator() {
-        guard let animator = blurAnimator else { return }
-        animator.stopAnimation(true)
-        animator.finishAnimation(at: .current)
-        blurAnimator = nil
-    }
-
-    private func applyPartialBlur() {
-        cleanUpAnimator()
-        blurView.effect = nil
-        let fraction = blurFraction
-        let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) {
-            self.blurView.effect = UIBlurEffect(style: .systemThinMaterial)
-        }
-        animator.fractionComplete = fraction
-        animator.pausesOnCompletion = true
-        blurAnimator = animator
-    }
-
-    @objc private func toggleReveal() {
+    @objc private func toggle() {
         isRevealed.toggle()
-        cleanUpAnimator()
-
-        if isRevealed {
-            UIView.animate(withDuration: 0.3) {
-                self.blurView.effect = nil
-            }
-            contentView.isUserInteractionEnabled = true
-        } else {
-            contentView.isUserInteractionEnabled = false
-            UIView.animate(withDuration: 0.3) {
-                self.blurView.effect = UIBlurEffect(style: .systemThinMaterial)
-            } completion: { _ in
-                self.blurView.effect = nil
-                self.applyPartialBlur()
-            }
+        let targetAlpha: CGFloat = isRevealed ? 0 : 1
+        contentView.isUserInteractionEnabled = isRevealed
+        UIView.animate(withDuration: 0.25) {
+            self.blurView.alpha = targetAlpha
         }
     }
 }
@@ -115,14 +75,16 @@ class SpoilerOverlayView: UIView {
 
 private class SpoilerBlockView: UIView {
     private let overlay: SpoilerOverlayView
+    private let contentStack: UIStackView
 
     init(blocks: [ContentBlock], config: NativeRenderConfig, delegate: PostCellDelegate?) {
         let contentStack = UIStackView()
         contentStack.axis = .vertical
         contentStack.spacing = 8
-        contentStack.backgroundColor = .systemBackground
+        contentStack.backgroundColor = ThemeManager.shared.cardBackgroundColor
         contentStack.isLayoutMarginsRelativeArrangement = true
         contentStack.layoutMargins = UIEdgeInsets(top: 4, left: 0, bottom: 4, right: 0)
+        self.contentStack = contentStack
 
         let views = NativeContentRenderer.renderBlocks(blocks, config: config, delegate: delegate)
         for view in views {
@@ -141,10 +103,21 @@ private class SpoilerBlockView: UIView {
             overlay.trailingAnchor.constraint(equalTo: trailingAnchor),
             overlay.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(themeDidChange),
+            name: ThemeManager.themeDidChangeNotification,
+            object: nil
+        )
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func themeDidChange() {
+        contentStack.backgroundColor = ThemeManager.shared.cardBackgroundColor
     }
 }
