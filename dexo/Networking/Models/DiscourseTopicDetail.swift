@@ -119,12 +119,45 @@ struct DiscourseTopicDetail: Decodable {
             case isPublic = "public"
             case chartType = "chart_type"
         }
+
+        // Custom init so a missing optional-ish field (type / status / results /
+        // public / voters) doesn't silently drop the entire post.polls array
+        // via `(try? decodeIfPresent([Poll].self, ...)) ?? []`. Only `name` and
+        // `options` are truly required to render.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            name = try c.decode(String.self, forKey: .name)
+            options = (try? c.decode([PollOption].self, forKey: .options)) ?? []
+            type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? "regular"
+            status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? "open"
+            isPublic = (try? c.decodeIfPresent(Bool.self, forKey: .isPublic)) ?? false
+            results = (try? c.decodeIfPresent(String.self, forKey: .results)) ?? "always"
+            min = try? c.decodeIfPresent(Int.self, forKey: .min)
+            max = try? c.decodeIfPresent(Int.self, forKey: .max)
+            voters = (try? c.decodeIfPresent(Int.self, forKey: .voters)) ?? 0
+            chartType = try? c.decodeIfPresent(String.self, forKey: .chartType)
+            title = try? c.decodeIfPresent(String.self, forKey: .title)
+        }
     }
 
     struct PollOption: Decodable {
         let id: String
         let html: String
         let votes: Int
+
+        enum CodingKeys: String, CodingKey {
+            case id, html, votes
+        }
+
+        // Number-type polls and pre-vote `results: "on_close"` responses omit
+        // the `votes` field entirely. Default to 0 so the whole poll decode
+        // doesn't fall over and leave `post.polls` empty.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            html = try c.decode(String.self, forKey: .html)
+            votes = (try? c.decodeIfPresent(Int.self, forKey: .votes)) ?? 0
+        }
     }
 
     struct Boost: Decodable, Identifiable, Sendable {
