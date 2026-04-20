@@ -140,13 +140,16 @@ final class ForumContainerViewController: BaseViewController, AuthGating {
             if i < titles.count {
                 rootVC.title = titles[i]
             }
+            let minimizeItem = UIBarButtonItem(
+                image: UIImage(systemName: "smallcircle.filled.circle"),
+                style: .plain,
+                target: self,
+                action: #selector(dismissButtonTapped)
+            )
+            minimizeItem.accessibilityLabel = String(localized: "forum.minimize.accessibility.label")
+            minimizeItem.accessibilityHint = String(localized: "forum.minimize.accessibility.hint")
             let rightItems = [
-                UIBarButtonItem(
-                    image: UIImage(systemName: "smallcircle.filled.circle"),
-                    style: .plain,
-                    target: self,
-                    action: #selector(dismissButtonTapped)
-                ),
+                minimizeItem,
 //                UIBarButtonItem(
 //                    image: UIImage(systemName: "ellipsis"),
 //                    style: .plain,

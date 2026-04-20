@@ -1160,6 +1160,38 @@
         }
       }
     },
+    "forum.minimize.accessibility.hint" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Double-tap to minimize this forum back to the forum list."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "双击将论坛最小化到论坛列表。"
+          }
+        }
+      }
+    },
+    "forum.minimize.accessibility.label" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Minimize forum"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最小化论坛"
+          }
+        }
+      }
+    },
     "forum.overlay.close" : {
       "localizations" : {
         "en" : {
@@ -1172,6 +1204,38 @@
           "stringUnit" : {
             "state" : "needs_review",
             "value" : "关闭"
+          }
+        }
+      }
+    },
+    "home.filter.accessibility.hint" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Double-tap to choose a category."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "双击打开分类选择菜单。"
+          }
+        }
+      }
+    },
+    "home.filter.accessibility.label" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Category filter"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分类筛选"
           }
         }
       }

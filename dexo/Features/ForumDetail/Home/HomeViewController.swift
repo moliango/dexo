@@ -438,6 +438,11 @@ final class HomeViewController: ObservableViewController {
         }
         categoryButton.configuration = config
         categoryButton.sizeToFit()
+
+        categoryButton.accessibilityLabel = String(localized: "home.filter.accessibility.label")
+        categoryButton.accessibilityValue = title
+        categoryButton.accessibilityHint = String(localized: "home.filter.accessibility.hint")
+        categoryButton.accessibilityTraits = [.button]
     }
 
     private func buildCategoryMenuElements() -> [UIMenuElement] {
