@@ -147,6 +147,10 @@ enum BlockquoteRenderer: BlockRenderer {
 
     struct ParsedCallout {
         let kind: CalloutKind
+        /// Custom title inlines from the same line as the `[!kind]` marker
+        /// (e.g. `[!success]视频端上来咯` → "视频端上来咯"). Empty falls back
+        /// to the localized default (`kind.title`).
+        let titleInlines: [InlineNode]
         let blocks: [ContentBlock]
     }
 
@@ -184,8 +188,7 @@ enum BlockquoteRenderer: BlockRenderer {
 
         let remainderText = ns.substring(from: match.range.upperBound)
 
-        // Rebuild the first paragraph without the marker. Also drop the
-        // immediately-following line break so the body text starts flush.
+        // Rebuild the first paragraph without the marker.
         var firstIsConsumed = false
         var rebuilt: [InlineNode] = []
         for inline in inlines {
@@ -201,21 +204,34 @@ enum BlockquoteRenderer: BlockRenderer {
                     // leading whitespace text node — skip
                     continue
                 }
-            } else if rebuilt.isEmpty, case .lineBreak = inline {
-                // drop a line break if the marker was the only thing on the first line
-                continue
             }
             rebuilt.append(inline)
         }
 
-        let trimmed = rebuilt.trimmedWhitespace()
+        // Obsidian-style callout title: content up to the first line break on
+        // the marker's line becomes the title; anything after the break is body.
+        // If nothing precedes the break, the default `kind.title` is used.
+        let splitIndex = rebuilt.firstIndex(where: {
+            if case .lineBreak = $0 { return true }
+            return false
+        })
+        let titleInlines: [InlineNode]
+        let bodyInlines: [InlineNode]
+        if let idx = splitIndex {
+            titleInlines = Array(rebuilt[..<idx]).trimmedWhitespace()
+            bodyInlines = Array(rebuilt[(idx + 1)...]).trimmedWhitespace()
+        } else {
+            titleInlines = rebuilt.trimmedWhitespace()
+            bodyInlines = []
+        }
+
         var resultBlocks = Array(inner)
-        if trimmed.isEmpty {
+        if bodyInlines.isEmpty {
             resultBlocks.removeFirst()
         } else {
-            resultBlocks[0] = .paragraph(trimmed)
+            resultBlocks[0] = .paragraph(bodyInlines)
         }
-        return ParsedCallout(kind: kind, blocks: resultBlocks)
+        return ParsedCallout(kind: kind, titleInlines: titleInlines, blocks: resultBlocks)
     }
 
     private static func renderCallout(
@@ -235,9 +251,12 @@ enum BlockquoteRenderer: BlockRenderer {
         iconView.setContentHuggingPriority(.required, for: .horizontal)
 
         let titleLabel = UILabel()
-        titleLabel.text = parsed.kind.title
+        let customTitle = plainText(from: parsed.titleInlines)
+        titleLabel.text = customTitle.isEmpty ? parsed.kind.title : customTitle
         titleLabel.font = FontManager.shared.font(size: config.baseFont.pointSize, weight: .semibold)
         titleLabel.textColor = parsed.kind.tint
+        titleLabel.numberOfLines = 1
+        titleLabel.lineBreakMode = .byTruncatingTail
 
         let titleRow = UIStackView(arrangedSubviews: [iconView, titleLabel])
         titleRow.axis = .horizontal
@@ -278,6 +297,41 @@ enum BlockquoteRenderer: BlockRenderer {
         ])
 
         return container
+    }
+}
+
+private extension BlockquoteRenderer {
+    /// Flatten callout-title inlines to a single-line plain string. Formatting,
+    /// links, and inline emoji images are dropped — the title label is a simple
+    /// single-line caption next to the icon.
+    static func plainText(from inlines: [InlineNode]) -> String {
+        var out = ""
+        for node in inlines {
+            appendPlainText(node, into: &out)
+        }
+        return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func appendPlainText(_ node: InlineNode, into out: inout String) {
+        switch node {
+        case .text(let t), .styledText(let t, _), .code(let t):
+            out.append(t)
+        case .link(_, let children), .spoiler(let children):
+            for child in children { appendPlainText(child, into: &out) }
+        case .mention(let username, _):
+            out.append("@")
+            out.append(username)
+        case .mentionGroup(let name, _):
+            out.append("@")
+            out.append(name)
+        case .hashtag(let text, _, _):
+            out.append("#")
+            out.append(text)
+        case .image(_, let alt, _, _, _):
+            if let alt, !alt.isEmpty { out.append(alt) }
+        case .lineBreak:
+            out.append(" ")
+        }
     }
 }
 

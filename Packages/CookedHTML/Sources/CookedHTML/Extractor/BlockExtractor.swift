@@ -12,6 +12,7 @@ enum BlockExtractor {
         "details",
         "hr",
         "div", "figure",
+        "video",
     ]
 
     /// Extract content blocks from a parent element's children.
@@ -139,6 +140,9 @@ enum BlockExtractor {
         case "img":
             return extractBlockImage(from: element, options: options)
 
+        case "video":
+            return extractRawVideo(from: element, options: options)
+
         case "div", "figure", "section", "article":
             // Check for specific div patterns first, otherwise recurse
             return extractDiv(from: element, options: options)
@@ -192,6 +196,13 @@ enum BlockExtractor {
             if childTag == "div" || childTag == "figure" {
                 return extractDiv(from: onlyChild, options: options)
             }
+        }
+
+        // Raw <video> nested in a <p> (e.g. `<p>caption<br><video>...</video></p>`).
+        // The inline extractor has no concept of videos, so split them out here
+        // before the paragraph collapses to inlines and drops the video URL.
+        if children.first(where: { $0.tagName().lowercased() == "video" }) != nil {
+            return splitOutRawVideos(from: element, options: options)
         }
 
         let inlines = InlineExtractor.extract(from: element, options: options)
@@ -396,6 +407,61 @@ enum BlockExtractor {
             videoId: videoId.isEmpty ? nil : videoId,
             provider: provider
         )]
+    }
+
+    /// Raw `<video>` element (not the Discourse onebox wrapper) — reads the
+    /// playable URL from `src` or the first `<source src>` child, and the
+    /// poster image if present. `width="100%"` is common, so width/height are
+    /// dropped unless they parse as integers (the renderer falls back to 16:9).
+    private static func extractRawVideo(from element: Element, options: ParseOptions) -> [ContentBlock] {
+        var url = (try? element.attr("src")) ?? ""
+        if url.isEmpty, let source = try? element.select("source").first() {
+            url = (try? source.attr("src")) ?? ""
+        }
+        let resolvedURL = URLResolver.resolve(url, baseURL: options.baseURL)
+        guard !resolvedURL.isEmpty else { return [] }
+
+        let poster = (try? element.attr("poster")) ?? ""
+        let thumbnailURL = poster.isEmpty ? nil : URLResolver.resolve(poster, baseURL: options.baseURL)
+
+        let width = Int((try? element.attr("width")) ?? "")
+        let height = Int((try? element.attr("height")) ?? "")
+
+        return [.video(
+            url: resolvedURL,
+            thumbnailURL: thumbnailURL,
+            title: nil,
+            width: width,
+            height: height,
+            videoId: nil,
+            provider: nil
+        )]
+    }
+
+    /// Walks a paragraph's children, emitting a `.paragraph` for inline runs and
+    /// a standalone `.video` block for each `<video>` child, so the video URL
+    /// isn't lost when the paragraph collapses to inlines.
+    private static func splitOutRawVideos(from element: Element, options: ParseOptions) -> [ContentBlock] {
+        var blocks: [ContentBlock] = []
+        var pendingInlines: [InlineNode] = []
+
+        func flushPending() {
+            let trimmed = pendingInlines.trimmedWhitespace()
+            pendingInlines.removeAll()
+            if trimmed.isEmpty { return }
+            blocks.append(contentsOf: splitLargeImages(from: trimmed))
+        }
+
+        for child in element.getChildNodes() {
+            if let el = child as? Element, el.tagName().lowercased() == "video" {
+                flushPending()
+                blocks.append(contentsOf: extractRawVideo(from: el, options: options))
+            } else {
+                pendingInlines.append(contentsOf: InlineExtractor.extractNode(child, options: options))
+            }
+        }
+        flushPending()
+        return blocks
     }
 
     // MARK: - Helpers
