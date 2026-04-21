@@ -64,5 +64,22 @@ struct DiscourseTopicList: Decodable {
             case createdAt = "created_at"
             case lastPostedAt = "last_posted_at"
         }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(Int.self, forKey: .id)
+            fancyTitle = try container.decode(String.self, forKey: .fancyTitle).decodingHTMLEntities()
+            title = try container.decode(String.self, forKey: .title)
+            postsCount = try container.decode(Int.self, forKey: .postsCount)
+            replyCount = try container.decode(Int.self, forKey: .replyCount)
+            views = try container.decode(Int.self, forKey: .views)
+            categoryId = try container.decodeIfPresent(Int.self, forKey: .categoryId)
+            createdAt = try container.decode(String.self, forKey: .createdAt)
+            lastPostedAt = try container.decodeIfPresent(String.self, forKey: .lastPostedAt)
+            pinned = try container.decodeIfPresent(Bool.self, forKey: .pinned)
+            unseen = try container.decodeIfPresent(Bool.self, forKey: .unseen)
+            excerpt = try container.decodeIfPresent(String.self, forKey: .excerpt)
+            posters = try container.decodeIfPresent([Poster].self, forKey: .posters)
+        }
     }
 }

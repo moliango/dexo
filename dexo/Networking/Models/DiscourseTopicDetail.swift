@@ -27,7 +27,7 @@ struct DiscourseTopicDetail: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
-        fancyTitle = try? container.decodeIfPresent(String.self, forKey: .fancyTitle)
+        fancyTitle = (try? container.decodeIfPresent(String.self, forKey: .fancyTitle))?.decodingHTMLEntities()
         postsCount = try container.decode(Int.self, forKey: .postsCount)
         replyCount = try container.decode(Int.self, forKey: .replyCount)
         categoryId = try? container.decodeIfPresent(Int.self, forKey: .categoryId)
