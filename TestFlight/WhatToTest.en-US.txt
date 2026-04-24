@@ -13,3 +13,6 @@ What to Test
 - Latest / Hot / Top tabs now route correctly inside a category
 - VoiceOver labels on the forum minimize and category filter nav buttons
 - Fixed number-type polls where options failed to render
+- Topic titles now decode HTML entities like `&amp;` / `&quot;` correctly
+- Native `<video>` embeds and custom callout titles render properly
+- Fewer redundant requests after login on linux.do
