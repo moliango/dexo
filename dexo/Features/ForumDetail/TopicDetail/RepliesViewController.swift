@@ -57,6 +57,7 @@ final class RepliesViewController: BaseViewController {
                 validReactions: validReactions,
                 isBoostsExpanded: isBoostsExpanded,
                 showsSeparator: !isBoostsExpanded,
+                hidesLikeButton: self.hidesLikeButton
             )
             return cell
 
@@ -83,6 +84,13 @@ final class RepliesViewController: BaseViewController {
         return ai
     }()
 
+    private let readTracker = TopicReadTracker()
+    private var readFlushTimer: Timer?
+    private var pendingReadFlush: DispatchWorkItem?
+    private static let readFlushInterval: TimeInterval = 60
+    private static let readFlushDebounce: TimeInterval = 1.5
+    private let hidesLikeButton: Bool
+
     init(api: DiscourseAPI, postId: Int, topicId: Int, validReactions: [String] = []) {
         self.api = api
         self.postId = postId
@@ -90,6 +98,7 @@ final class RepliesViewController: BaseViewController {
         self.validReactions = validReactions
         self.baseURL = api.baseURL
         self.assetBaseURL = api.assetBaseURL
+        self.hidesLikeButton = ForumPolicy.hidesLikeButton(baseURL: api.baseURL)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -117,6 +126,90 @@ final class RepliesViewController: BaseViewController {
 
         Task {
             await loadReplies()
+        }
+
+        let nc = NotificationCenter.default
+        nc.addObserver(
+            self, selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+        nc.addObserver(
+            self, selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        resumeReadTracking()
+        startReadFlushTimer()
+        scheduleDebouncedReadFlush()
+    }
+
+    @objc private func appDidEnterBackground() {
+        cancelPendingReadFlush()
+        stopReadFlushTimer()
+        flushReadTimings()
+        readTracker.pause()
+    }
+
+    @objc private func appWillEnterForeground() {
+        resumeReadTracking()
+        startReadFlushTimer()
+        scheduleDebouncedReadFlush()
+    }
+
+    private func scheduleDebouncedReadFlush() {
+        cancelPendingReadFlush()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingReadFlush = nil
+            self?.flushReadTimings()
+        }
+        pendingReadFlush = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.readFlushDebounce, execute: work)
+    }
+
+    private func cancelPendingReadFlush() {
+        pendingReadFlush?.cancel()
+        pendingReadFlush = nil
+    }
+
+    private func resumeReadTracking() {
+        readTracker.startSession()
+        for indexPath in tableView.indexPathsForVisibleRows ?? [] {
+            guard let item = dataSource.itemIdentifier(for: indexPath),
+                  case .post(let postId) = item,
+                  let post = replies.first(where: { $0.id == postId }) else { continue }
+            readTracker.recordVisible(postNumber: post.postNumber)
+        }
+    }
+
+    private func startReadFlushTimer() {
+        stopReadFlushTimer()
+        let timer = Timer(timeInterval: Self.readFlushInterval, repeats: true) { [weak self] _ in
+            self?.flushReadTimings()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        readFlushTimer = timer
+    }
+
+    private func stopReadFlushTimer() {
+        readFlushTimer?.invalidate()
+        readFlushTimer = nil
+    }
+
+    private func flushReadTimings() {
+        let snap = readTracker.snapshotDelta()
+        debugLog("[ReadTracker] replies topic=\(topicId) flush topic_time=\(snap.topicTime) posts=\(snap.timings.count)")
+        guard !snap.timings.isEmpty else { return }
+        let topicId = self.topicId
+        let api = self.api
+        Task.detached {
+            try? await api.postTopicTimings(
+                topicId: topicId,
+                topicTime: snap.topicTime,
+                timings: snap.timings
+            )
         }
     }
 
@@ -167,6 +260,42 @@ extension RepliesViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
         200
+    }
+
+    func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard let item = dataSource.itemIdentifier(for: indexPath),
+              case .post(let postId) = item,
+              let post = replies.first(where: { $0.id == postId }) else { return }
+        readTracker.recordVisible(postNumber: post.postNumber)
+    }
+
+    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
+        guard let item = dataSource.itemIdentifier(for: indexPath),
+              case .post(let postId) = item,
+              let post = replies.first(where: { $0.id == postId }) else { return }
+        readTracker.recordHidden(postNumber: post.postNumber)
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        scheduleDebouncedReadFlush()
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { scheduleDebouncedReadFlush() }
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        cancelPendingReadFlush()
+    }
+}
+
+extension RepliesViewController {
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        cancelPendingReadFlush()
+        stopReadFlushTimer()
+        flushReadTimings()
+        readTracker.pause()
     }
 }
 

@@ -9,6 +9,97 @@ private nonisolated enum TopicDetailItem: Hashable, Sendable {
     case boosts(Int)
 }
 
+// MARK: - Topic Read Tracker
+
+/// Tracks how long each post was visible on screen so we can POST `/topics/timings`
+/// and have Discourse mark the posts as read (which is what `/read.json` reflects).
+/// `nonisolated` to dodge the iOS 26 back-deploy `swift_task_deinitOnExecutorMainActorBackDeploy`
+/// crash for MainActor helper deinits.
+nonisolated final class TopicReadTracker {
+    private var visibleStarts: [Int: CFTimeInterval] = [:]
+    private var elapsedByPost: [Int: Int] = [:]
+    private var totalSentByPost: [Int: Int] = [:]
+    private var sessionStart: CFTimeInterval?
+    private var sessionAccumulated: Int = 0
+
+    /// Begin / resume the topic-level timer. Idempotent.
+    func startSession() {
+        guard sessionStart == nil else { return }
+        sessionStart = CACurrentMediaTime()
+    }
+
+    func recordVisible(postNumber: Int) {
+        guard visibleStarts[postNumber] == nil else { return }
+        visibleStarts[postNumber] = CACurrentMediaTime()
+    }
+
+    func recordHidden(postNumber: Int) {
+        guard let start = visibleStarts.removeValue(forKey: postNumber) else { return }
+        addElapsed(postNumber: postNumber, elapsed: msSince(start))
+    }
+
+    /// Roll up in-flight timers and stop counting until the next `startSession`.
+    /// Used when the VC is covered (push) or app backgrounded — the user isn't
+    /// actually reading anymore so per-post and topic timers must freeze.
+    func pause() {
+        let now = CACurrentMediaTime()
+        for (postNumber, start) in visibleStarts {
+            addElapsed(postNumber: postNumber, elapsed: Int((now - start) * 1000))
+        }
+        visibleStarts = [:]
+        if let start = sessionStart {
+            sessionAccumulated += Int((now - start) * 1000)
+            sessionStart = nil
+        }
+    }
+
+    /// Snapshot the unsent delta and reset delta state. Visible cells and the
+    /// session timer keep ticking — their start times are reset to `now` so
+    /// the next snapshot picks up cleanly without double-counting (the server
+    /// treats `/topics/timings` POSTs as additive).
+    func snapshotDelta() -> (topicTime: Int, timings: [Int: Int]) {
+        let now = CACurrentMediaTime()
+        for (postNumber, start) in visibleStarts {
+            addElapsed(postNumber: postNumber, elapsed: Int((now - start) * 1000))
+            visibleStarts[postNumber] = now
+        }
+        if let start = sessionStart {
+            sessionAccumulated += Int((now - start) * 1000)
+            sessionStart = now
+        }
+        let snapTopic = sessionAccumulated
+        let snapTimings = elapsedByPost
+        for (postNumber, ms) in snapTimings {
+            totalSentByPost[postNumber, default: 0] += ms
+        }
+        sessionAccumulated = 0
+        elapsedByPost = [:]
+        return (snapTopic, snapTimings)
+    }
+
+    /// - Skips flash-by visits (< 500 ms).
+    /// - Caps cumulative *sent + pending* at MAX_TRACKING_TIME (6 min) to match
+    ///   Discourse's per-session ceiling, so a post sitting on-screen for hours
+    ///   doesn't skew server-side `avg_time` scoring.
+    private func addElapsed(postNumber: Int, elapsed: Int) {
+        guard elapsed >= Self.minVisibleMs else { return }
+        let pending = elapsedByPost[postNumber, default: 0]
+        let alreadySent = totalSentByPost[postNumber, default: 0]
+        let remaining = max(0, Self.maxPerPostMs - pending - alreadySent)
+        let toAdd = min(elapsed, remaining)
+        if toAdd > 0 {
+            elapsedByPost[postNumber] = pending + toAdd
+        }
+    }
+
+    private func msSince(_ start: CFTimeInterval) -> Int {
+        Int((CACurrentMediaTime() - start) * 1000)
+    }
+
+    private static let maxPerPostMs = 6 * 60 * 1000
+    private static let minVisibleMs = 1000
+}
+
 // MARK: - Frame Drop Detector (temporary perf debugging)
 final class FrameDropDetector {
     private var displayLink: CADisplayLink?
@@ -87,6 +178,12 @@ final class TopicDetailViewController: ObservableViewController {
     private var precomputedWidth: CGFloat = 0
     private let imageZoomTransition = ImageZoomTransitionDelegate()
     private lazy var boostDanmaku = BoostDanmakuOverlay(hostView: view)
+    private let readTracker = TopicReadTracker()
+    private var readFlushTimer: Timer?
+    private var pendingReadFlush: DispatchWorkItem?
+    private static let readFlushInterval: TimeInterval = 60
+    private static let readFlushDebounce: TimeInterval = 1.5
+    private let hidesLikeButton: Bool
 
     private lazy var tableView: UITableView = {
         let tv = ThemedTableView(frame: .zero, style: .plain)
@@ -139,7 +236,8 @@ final class TopicDetailViewController: ObservableViewController {
                 validReactions: self.viewModel.topic?.validReactions ?? [],
                 isBoostsExpanded: isBoostsExpanded,
                 showsSeparator: showsSeparator,
-                precomputedBlockHeights: self.precomputedBlockHeights[postId]
+                precomputedBlockHeights: self.precomputedBlockHeights[postId],
+                hidesLikeButton: self.hidesLikeButton
             )
             // Cache newly rendered views for future reuse
             if cachedViews == nil {
@@ -264,6 +362,7 @@ final class TopicDetailViewController: ObservableViewController {
         self.baseURL = api.baseURL
         self.assetBaseURL = api.assetBaseURL
         self.initialFloor = initialFloor
+        self.hidesLikeButton = ForumPolicy.hidesLikeButton(baseURL: api.baseURL)
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
     }
@@ -328,6 +427,114 @@ final class TopicDetailViewController: ObservableViewController {
             await api.loadOrFetchEmojiMap()
             hasTitleHeader = false
             updateUI()
+        }
+
+        // Registered once. Selector-based observers are auto-cleared on dealloc
+        // (iOS 9+), so no explicit removeObserver needed.
+        let nc = NotificationCenter.default
+        nc.addObserver(
+            self, selector: #selector(appDidEnterBackground),
+            name: UIApplication.didEnterBackgroundNotification, object: nil
+        )
+        nc.addObserver(
+            self, selector: #selector(appWillEnterForeground),
+            name: UIApplication.willEnterForegroundNotification, object: nil
+        )
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        resumeReadTracking()
+        startReadFlushTimer()
+        // Initial "rush" flush: same code path as scroll-stop — debounced by
+        // `readFlushDebounce` (1.5s) so visible cells cross the 1s min threshold
+        // and get included in the snapshot.
+        scheduleDebouncedReadFlush()
+    }
+
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        cancelPendingReadFlush()
+        stopReadFlushTimer()
+        flushReadTimings()
+        // Pause stops the topic timer (and clears in-flight visible-cell timers)
+        // until the next viewWillAppear, so any time the VC is off-screen — push,
+        // tab switch, app background — doesn't get attributed to the next snapshot.
+        readTracker.pause()
+    }
+
+    @objc private func appDidEnterBackground() {
+        cancelPendingReadFlush()
+        stopReadFlushTimer()
+        flushReadTimings()
+        readTracker.pause()
+    }
+
+    @objc private func appWillEnterForeground() {
+        resumeReadTracking()
+        startReadFlushTimer()
+        scheduleDebouncedReadFlush()
+    }
+
+    /// Schedule a flush 1.5s from now, replacing any earlier pending one. Used by
+    /// scroll-stop and entry hooks so a fresh batch of visible cells gets time to
+    /// cross the 1s `minVisibleMs` threshold before we snapshot them.
+    private func scheduleDebouncedReadFlush() {
+        cancelPendingReadFlush()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingReadFlush = nil
+            self?.flushReadTimings()
+        }
+        pendingReadFlush = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.readFlushDebounce, execute: work)
+    }
+
+    private func cancelPendingReadFlush() {
+        pendingReadFlush?.cancel()
+        pendingReadFlush = nil
+    }
+
+    /// Start a fresh tracking session and re-arm timers for cells that are already
+    /// on screen — those cells won't receive a new `willDisplay` callback after a
+    /// pause (push→pop, foreground from background), so we'd miss their time.
+    private func resumeReadTracking() {
+        readTracker.startSession()
+        for indexPath in tableView.indexPathsForVisibleRows ?? [] {
+            guard let item = dataSource.itemIdentifier(for: indexPath),
+                  case .post(let postId) = item,
+                  let post = viewModel.postsById[postId] else { continue }
+            readTracker.recordVisible(postNumber: post.postNumber)
+        }
+    }
+
+    private func startReadFlushTimer() {
+        stopReadFlushTimer()
+        // Schedule on .common so the periodic flush also fires during table-view
+        // scrolling (the run loop is in tracking mode then; .default-only timers stall).
+        let timer = Timer(timeInterval: Self.readFlushInterval, repeats: true) { [weak self] _ in
+            self?.flushReadTimings()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        readFlushTimer = timer
+    }
+
+    private func stopReadFlushTimer() {
+        readFlushTimer?.invalidate()
+        readFlushTimer = nil
+    }
+
+    private func flushReadTimings() {
+        let snap = readTracker.snapshotDelta()
+        debugLog("[ReadTracker] topic=\(topicId) flush topic_time=\(snap.topicTime) posts=\(snap.timings.count)")
+        guard !snap.timings.isEmpty else { return }
+        let topicId = self.topicId
+        let api = self.api
+        Task.detached {
+            try? await api.postTopicTimings(
+                topicId: topicId,
+                topicTime: snap.topicTime,
+                timings: snap.timings
+            )
         }
     }
 
@@ -989,6 +1196,9 @@ extension TopicDetailViewController: UITableViewDelegate {
         // Cache cell height for accurate estimates
         if let item = dataSource.itemIdentifier(for: indexPath) {
             cellHeightCache[item] = cell.bounds.height
+            if case .post(let postId) = item, let post = viewModel.postsById[postId] {
+                readTracker.recordVisible(postNumber: post.postNumber)
+            }
         }
 
         let totalRows = tableView.numberOfRows(inSection: 0)
@@ -1003,7 +1213,25 @@ extension TopicDetailViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         if let item = dataSource.itemIdentifier(for: indexPath) {
             cellHeightCache[item] = cell.bounds.height
+            if case .post(let postId) = item, let post = viewModel.postsById[postId] {
+                readTracker.recordHidden(postNumber: post.postNumber)
+            }
         }
+    }
+
+    // Match what the official Discourse client does: after scroll settles, wait a
+    // beat so newly-revealed posts cross the min-visible threshold, then flush.
+    // The pending flush is cancelled if the user starts scrolling again before it fires.
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        scheduleDebouncedReadFlush()
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        if !decelerate { scheduleDebouncedReadFlush() }
+    }
+
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        cancelPendingReadFlush()
     }
 }
 

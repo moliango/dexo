@@ -5,6 +5,7 @@ enum DiscourseRouter {
     case latestTopics(page: Int)
     case hotTopics(page: Int)
     case topTopics(page: Int)
+    case readTopics(page: Int)
     case categories
     case topic(id: Int, nearPostNumber: Int? = nil)
     case topicPosts(topicId: Int, postIds: [Int])
@@ -64,6 +65,8 @@ enum DiscourseRouter {
             return "/hot.json?page=\(page)"
         case .topTopics(let page):
             return "/top.json?page=\(page)"
+        case .readTopics(let page):
+            return "/read.json?page=\(page)"
         case .categories:
             return "/categories.json?include_subcategories=true"
         case .topic(let id, let nearPostNumber):

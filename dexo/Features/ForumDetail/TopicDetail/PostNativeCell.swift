@@ -430,6 +430,7 @@ final class PostNativeCell: UITableViewCell {
         isBoostsExpanded: Bool,
         showsSeparator: Bool,
         precomputedBlockHeights: [CGFloat]? = nil,
+        hidesLikeButton: Bool = false,
     ) {
         let fm = FontManager.shared
         let avatarSize = fm.scaled(Self.baseAvatarSize)
@@ -549,8 +550,13 @@ final class PostNativeCell: UITableViewCell {
         // Enabled when the user can like, or has already liked (and may undo).
         reactButton.isEnabled = canAct || liked
         // Hide entirely when there's nothing to show — own post with zero likes
-        // and no reactions plugin to provide the affordance.
-        reactButton.isHidden = !canAct && !liked && likeCount == 0 && !reactionsPluginActive
+        // and no reactions plugin to provide the affordance. Caller can also
+        // force-hide (e.g., a forum where the like affordance is suppressed).
+        reactButton.isHidden = hidesLikeButton || (!canAct && !liked && likeCount == 0 && !reactionsPluginActive)
+        if hidesLikeButton {
+            reactButton.isEnabled = false
+            cancelUserReactionImageLoad()
+        }
 
         reactButton.accessibilityLabel = liked
             ? String(localized: "post.a11y.liked")

@@ -48,6 +48,10 @@ final class DiscourseAPI {
         try await request(route: .topTopics(page: page))
     }
 
+    func fetchReadTopics(page: Int = 0) async throws -> DiscourseTopicList {
+        try await request(route: .readTopics(page: page))
+    }
+
     func fetchCategories() async throws -> DiscourseCategoryList {
         try await request(route: .categories)
     }
@@ -342,26 +346,48 @@ final class DiscourseAPI {
         }
     }
 
-    /// Record topic timings so Discourse marks posts as read.
-    func postTopicTimings(topicId: Int, highestPostNumber: Int) async throws {
+    /// Record per-post read durations so Discourse marks posts as read and they
+    /// appear in the user's `/read.json` list.
+    /// - Parameters:
+    ///   - topicId: target topic
+    ///   - topicTime: total time spent on the topic in milliseconds
+    ///   - timings: per-post duration map (postNumber → milliseconds visible)
+    func postTopicTimings(topicId: Int, topicTime: Int, timings: [Int: Int]) async throws {
+        // Per-forum opt-out (e.g., linux.do) — drop the request entirely.
+        guard ForumPolicy.tracksReadTimings(baseURL: baseURL) else { return }
+        // Circuit breaker: a forum where timings reliably fail (anonymous, read-only,
+        // server-side disabled, …) keeps failing every visit. Stop the bleeding after
+        // a few consecutive misses for the rest of this app session.
+        if topicTimingsFailureCount >= Self.maxTopicTimingsFailures {
+            debugLog("[DiscourseAPI] timings: skipped (circuit-breaker tripped, \(topicTimingsFailureCount) failures)")
+            return
+        }
+        guard !timings.isEmpty else { return }
         let route = DiscourseRouter.topicTimings
         let url = baseURL + route.path
-        // timings dict: key = post number (string), value = milliseconds spent
-        var timings: [String: Int] = [:]
-        for i in 1 ... highestPostNumber {
-            timings[String(i)] = 1000
-        }
+        let stringKeyed = Dictionary(uniqueKeysWithValues: timings.map { (String($0.key), $0.value) })
         let parameters: Parameters = [
             "topic_id": topicId,
-            "topic_time": 1000,
-            "timings": timings,
+            "topic_time": topicTime,
+            "timings": stringKeyed,
         ]
-        let response = await session.request(url, method: route.method, parameters: parameters, encoding: JSONEncoding.default)
+        debugLog("[DiscourseAPI] POST /topics/timings topic=\(topicId) topic_time=\(topicTime) posts=\(timings.count)")
+        let response = await session.request(url, method: route.method, parameters: parameters, encoding: URLEncoding.default)
             .serializingData().response
-        if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
+        let status = response.response?.statusCode ?? 0
+        if (200 ..< 300).contains(status) {
+            topicTimingsFailureCount = 0
+            debugLog("[DiscourseAPI] timings: ok (\(status))")
+        } else {
+            topicTimingsFailureCount += 1
+            let body = response.data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            debugLog("[DiscourseAPI] timings: FAILED status=\(status) body=\(body) (consec=\(topicTimingsFailureCount))")
             throw DiscourseAPIError(messages: ["Failed to post topic timings"], errorType: nil)
         }
     }
+
+    private var topicTimingsFailureCount: Int = 0
+    private static let maxTopicTimingsFailures = 3
 
     /// Fetch the shared_session_key from the main site HTML meta tag.
     func fetchSharedSessionKey() async -> String? {

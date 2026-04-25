@@ -1464,6 +1464,22 @@
         }
       }
     },
+    "me.read" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Read"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已读"
+          }
+        }
+      }
+    },
     "me.bookmarks.empty" : {
       "localizations" : {
         "en" : {

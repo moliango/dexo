@@ -246,7 +246,7 @@ extension MeViewController: UITableViewDataSource {
         switch section {
         case 0:
             let isLoggedIn = authGate?.isAuthenticated() ?? false
-            return isLoggedIn ? 2 : 0
+            return isLoggedIn ? 3 : 0
         case 1:
             return 1
         default:
@@ -268,6 +268,9 @@ extension MeViewController: UITableViewDataSource {
             case 1:
                 content.image = UIImage(systemName: "bookmark")
                 content.text = String(localized: "me.bookmarks")
+            case 2:
+                content.image = UIImage(systemName: "checkmark.circle")
+                content.text = String(localized: "me.read")
             default:
                 break
             }
@@ -320,6 +323,9 @@ extension MeViewController: UITableViewDelegate {
             case 1:
                 guard let username = viewModel.currentUser?.username else { return }
                 let vc = BookmarksViewController(api: api, username: username)
+                navigationController?.pushViewController(vc, animated: true)
+            case 2:
+                let vc = ReadTopicsViewController(api: api)
                 navigationController?.pushViewController(vc, animated: true)
             default:
                 break

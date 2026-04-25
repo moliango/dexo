@@ -70,23 +70,43 @@ final class TopicComposerViewController: ObservableViewController {
         return sv
     }()
 
-    private lazy var tagSuggestionsTable: UITableView = {
-        let tv = UITableView(frame: .zero, style: .plain)
-        tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.isHidden = true
-        tv.register(UITableViewCell.self, forCellReuseIdentifier: "TagCell")
-        tv.delegate = self
-        tv.dataSource = self
-        tv.rowHeight = UITableView.automaticDimension
-        tv.estimatedRowHeight = 44
-        tv.separatorInset = UIEdgeInsets(top: 0, left: 16, bottom: 0, right: 16)
-        tv.layer.borderColor = UIColor.separator.cgColor
-        tv.layer.borderWidth = 0.5
-        return tv
+    private lazy var tagSuggestionsBackdrop: UIView = {
+        let v = UIView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.isHidden = true
+        return v
+    }()
+
+    private lazy var tagSuggestionsScroll: UIScrollView = {
+        let sv = UIScrollView()
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        sv.showsHorizontalScrollIndicator = false
+        sv.isHidden = true
+        return sv
+    }()
+
+    private lazy var tagSuggestionsStack: UIStackView = {
+        let sv = UIStackView()
+        sv.axis = .horizontal
+        sv.spacing = 6
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
+    }()
+
+    private lazy var tagSuggestionsDoneButton: UIButton = {
+        let button = UIButton(type: .system)
+        let img = UIImage(
+            systemName: "checkmark.circle.fill",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .semibold)
+        )
+        button.setImage(img, for: .normal)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true
+        button.addTarget(self, action: #selector(dismissTagField), for: .touchUpInside)
+        return button
     }()
 
     private var tagSearchDebounceTask: Task<Void, Never>?
-    private var tagSuggestionsTopConstraint: NSLayoutConstraint?
     /// Category id from a restored draft waiting for `loadCategories()` to finish
     /// so we can resolve it to the concrete `DiscourseCategory`.
     private var pendingDraftCategoryId: Int?
@@ -234,13 +254,14 @@ final class TopicComposerViewController: ObservableViewController {
         view.addSubview(bodyTextView)
         view.addSubview(bodyPlaceholder)
         view.addSubview(uploadOverlay)
-        view.addSubview(tagSuggestionsTable)
+        view.addSubview(tagSuggestionsBackdrop)
+        view.addSubview(tagSuggestionsScroll)
+        view.addSubview(tagSuggestionsDoneButton)
+        tagSuggestionsScroll.addSubview(tagSuggestionsStack)
 
         let titleHeight: CGFloat = 48
         let rowHeight: CGFloat = 44
-
-        let suggestionsTop = tagSuggestionsTable.topAnchor.constraint(equalTo: tagRow.bottomAnchor)
-        tagSuggestionsTopConstraint = suggestionsTop
+        let suggestionsHeight: CGFloat = 32
 
         NSLayoutConstraint.activate([
             headerStack.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
@@ -266,10 +287,26 @@ final class TopicComposerViewController: ObservableViewController {
             bodyPlaceholder.topAnchor.constraint(equalTo: bodyTextView.topAnchor, constant: 12),
             bodyPlaceholder.leadingAnchor.constraint(equalTo: bodyTextView.leadingAnchor, constant: 13),
 
-            suggestionsTop,
-            tagSuggestionsTable.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tagSuggestionsTable.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tagSuggestionsTable.heightAnchor.constraint(lessThanOrEqualToConstant: 160),
+            tagSuggestionsBackdrop.topAnchor.constraint(equalTo: tagRow.bottomAnchor),
+            tagSuggestionsBackdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            tagSuggestionsBackdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            tagSuggestionsBackdrop.bottomAnchor.constraint(equalTo: tagSuggestionsScroll.bottomAnchor, constant: 6),
+
+            tagSuggestionsScroll.topAnchor.constraint(equalTo: tagRow.bottomAnchor, constant: 4),
+            tagSuggestionsScroll.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            tagSuggestionsScroll.trailingAnchor.constraint(equalTo: tagSuggestionsDoneButton.leadingAnchor, constant: -8),
+            tagSuggestionsScroll.heightAnchor.constraint(equalToConstant: suggestionsHeight),
+
+            tagSuggestionsStack.topAnchor.constraint(equalTo: tagSuggestionsScroll.topAnchor),
+            tagSuggestionsStack.leadingAnchor.constraint(equalTo: tagSuggestionsScroll.leadingAnchor),
+            tagSuggestionsStack.trailingAnchor.constraint(equalTo: tagSuggestionsScroll.trailingAnchor),
+            tagSuggestionsStack.bottomAnchor.constraint(equalTo: tagSuggestionsScroll.bottomAnchor),
+            tagSuggestionsStack.heightAnchor.constraint(equalTo: tagSuggestionsScroll.heightAnchor),
+
+            tagSuggestionsDoneButton.centerYAnchor.constraint(equalTo: tagSuggestionsScroll.centerYAnchor),
+            tagSuggestionsDoneButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            tagSuggestionsDoneButton.widthAnchor.constraint(equalToConstant: 32),
+            tagSuggestionsDoneButton.heightAnchor.constraint(equalToConstant: 32),
         ])
     }
 
@@ -434,6 +471,10 @@ final class TopicComposerViewController: ObservableViewController {
         viewModel.title = titleField.text ?? ""
     }
 
+    @objc private func dismissTagField() {
+        tagField.resignFirstResponder()
+    }
+
     @objc private func tagFieldChanged() {
         let query = tagField.text ?? ""
         tagSearchDebounceTask?.cancel()
@@ -549,12 +590,46 @@ final class TopicComposerViewController: ObservableViewController {
     }
 
     private func updateTagSuggestions() {
-        let hasSuggestions = !displayedTagSuggestions.isEmpty
-        tagSuggestionsTable.isHidden = !hasSuggestions
-        if hasSuggestions {
-            tagSuggestionsTable.reloadData()
-            view.bringSubviewToFront(tagSuggestionsTable)
+        let tags = displayedTagSuggestions
+        let hasSuggestions = !tags.isEmpty
+        tagSuggestionsBackdrop.isHidden = !hasSuggestions
+        tagSuggestionsScroll.isHidden = !hasSuggestions
+        tagSuggestionsDoneButton.isHidden = !hasSuggestions
+        tagSuggestionsStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        guard hasSuggestions else { return }
+        for tag in tags {
+            tagSuggestionsStack.addArrangedSubview(makeSuggestionChip(tag))
         }
+        tagSuggestionsBackdrop.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        tagSuggestionsDoneButton.tintColor = ThemeManager.shared.accentColor
+        view.bringSubviewToFront(tagSuggestionsBackdrop)
+        view.bringSubviewToFront(tagSuggestionsScroll)
+        view.bringSubviewToFront(tagSuggestionsDoneButton)
+        tagSuggestionsScroll.contentOffset = .zero
+    }
+
+    private func makeSuggestionChip(_ tag: DiscourseTag) -> UIView {
+        let accent = ThemeManager.shared.accentColor
+        let button = UIButton(type: .system)
+        var config = UIButton.Configuration.plain()
+        config.title = tag.count > 0 ? "\(tag.text) · \(tag.count)" : tag.text
+        config.baseForegroundColor = accent
+        config.background.backgroundColor = accent.withAlphaComponent(0.10)
+        config.background.strokeColor = accent.withAlphaComponent(0.30)
+        config.background.strokeWidth = 0.5
+        config.background.cornerRadius = 14
+        config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10)
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attrs in
+            var a = attrs
+            a.font = FontManager.shared.font(size: 13, weight: .medium)
+            return a
+        }
+        button.configuration = config
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addAction(UIAction { [weak self] _ in
+            self?.selectTag(tag.text)
+        }, for: .touchUpInside)
+        return button
     }
 
     // MARK: - Markdown Toolbar
@@ -806,33 +881,11 @@ extension TopicComposerViewController: UITextFieldDelegate {
         guard textField === tagField, viewModel.selectedCategory != nil else { return }
         refreshTagSuggestionsIfNeeded()
     }
-}
 
-// MARK: - UITableViewDataSource & Delegate (Tag Suggestions)
-
-extension TopicComposerViewController: UITableViewDataSource, UITableViewDelegate {
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        displayedTagSuggestions.count
-    }
-
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "TagCell", for: indexPath)
-        let tag = displayedTagSuggestions[indexPath.row]
-        var content = cell.defaultContentConfiguration()
-        content.text = tag.text
-        content.secondaryText = "\(tag.count)"
-        content.textProperties.font = FontManager.shared.font(size: 15)
-        content.secondaryTextProperties.font = FontManager.shared.font(size: 13)
-        content.secondaryTextProperties.color = .secondaryLabel
-        cell.contentConfiguration = content
-        cell.backgroundColor = .systemBackground
-        return cell
-    }
-
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        let tag = displayedTagSuggestions[indexPath.row]
-        selectTag(tag.text)
+    func textFieldDidEndEditing(_ textField: UITextField) {
+        guard textField === tagField else { return }
+        tagSearchDebounceTask?.cancel()
+        viewModel.tagSuggestions = []
     }
 }
 
