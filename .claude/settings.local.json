@@ -37,7 +37,13 @@
       "mcp__xcodebuildmcp__screenshot",
       "Bash(axe screenshot *)",
       "Bash(axe describe-ui *)",
-      "Bash(axe type *)"
+      "Bash(axe type *)",
+      "Bash(awk NR==1525 { print length\\($0\\) } *)",
+      "Read(//tmp/**)",
+      "mcp__xcodebuildmcp__session_show_defaults",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git commit *)"
     ]
   },
   "enabledMcpjsonServers": [

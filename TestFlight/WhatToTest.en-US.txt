@@ -3,4 +3,4 @@ What to Test
 - New "Read" entry on the profile page lists topics you've already read
 - Read time now syncs to the server so the Read list and unread state update correctly
 - Composer tag suggestions are now a horizontal chip strip with a Done button — no longer covers the body
-- linux.do: like button hidden, read-tracking opt-out
+- l: like button hidden, read-tracking opt-out
