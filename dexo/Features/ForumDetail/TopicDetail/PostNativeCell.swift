@@ -282,7 +282,7 @@ final class PostNativeCell: UITableViewCell {
         let t0 = CACurrentMediaTime()
         let size = super.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: horizontalFittingPriority, verticalFittingPriority: verticalFittingPriority)
         let ms = (CACurrentMediaTime() - t0) * 1000
-        if ms > 3 { FrameDropDetector.shared.log("sizeFitting post#\(postId) \(String(format: "%.1f", ms))ms → h=\(String(format: "%.0f", size.height))") }
+        if ms > 1 { debugLog("sizeFitting post#\(postId) \(String(format: "%.1f", ms))ms → h=\(String(format: "%.0f", size.height))") }
         return size
     }
 
@@ -437,7 +437,7 @@ final class PostNativeCell: UITableViewCell {
         validReactions: [String],
         isBoostsExpanded: Bool,
         showsSeparator: Bool,
-        precomputedBlockHeights: [CGFloat]? = nil,
+        precomputedBlockHeights: [CGFloat?]? = nil,
         hidesLikeButton: Bool = false,
     ) {
         let fm = FontManager.shared

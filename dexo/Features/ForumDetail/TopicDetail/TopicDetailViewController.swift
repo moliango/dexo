@@ -169,13 +169,22 @@ final class TopicDetailViewController: ObservableViewController {
     /// Per-block heights computed by `BlockHeightCalculator`, fed back into
     /// `cell.configure` so each block view gets an explicit `heightAnchor` and
     /// the cell skips the Core-Text-typesetting cascade in `systemLayoutSizeFitting`.
-    private var precomputedBlockHeights: [Int: [CGFloat]] = [:]
+    private var precomputedBlockHeights: [Int: [CGFloat?]] = [:]
     /// Total cell height (chrome + content stack + spacing). Returned directly
     /// from `heightForRowAt` to bypass `automaticDimension` measurement entirely.
     private var precomputedTotalHeights: [Int: CGFloat] = [:]
     /// Tracks the table width the cache was computed against. A width change
     /// (rotation, split-view resize) invalidates the entire cache.
     private var precomputedWidth: CGFloat = 0
+    /// Serial background queue that warms `precomputedBlockHeights` /
+    /// `precomputedTotalHeights` ahead of cellForRowAt. The synchronous
+    /// `precomputeHeights(forPostId:)` in the cell provider is otherwise a
+    /// 30–80ms `boundingRect` typesetting pass for paragraph-heavy posts —
+    /// directly visible as a frame drop the moment such a post scrolls in.
+    private let heightWarmupQueue = DispatchQueue(label: "topic.heightWarmup", qos: .userInitiated)
+    /// Width the warmup task in-flight is using. Set on dispatch, cleared on
+    /// completion. Used to skip duplicate scheduling.
+    private var heightWarmupInFlightWidth: CGFloat = 0
     private let imageZoomTransition = ImageZoomTransitionDelegate()
     private lazy var boostDanmaku = BoostDanmakuOverlay(hostView: view)
     private let readTracker = TopicReadTracker()
@@ -547,6 +556,8 @@ final class TopicDetailViewController: ObservableViewController {
             tableView.verticalScrollIndicatorInsets.bottom = bottomInset
         }
 
+        warmHeightCacheInBackground()
+
         // Retry the scroll after further layout passes in case the target row's
         // height changed after initial display (e.g. async image loads).
         if let pending = pendingScrollIndexPath {
@@ -704,6 +715,10 @@ final class TopicDetailViewController: ObservableViewController {
                 nextJumpPosition = .top
                 performJumpScroll(toFloor: targetFloor, position: position)
             }
+
+            // Newly-applied posts may not have heights yet — pre-warm in the
+            // background so they're cached by the time they scroll into view.
+            warmHeightCacheInBackground()
         }
     }
 
@@ -1122,15 +1137,29 @@ extension TopicDetailViewController: UITableViewDelegate {
             precomputedWidth = tableWidth
         }
         if precomputedBlockHeights[postId] != nil { return }
-        guard let heights = BlockHeightCalculator.perBlockHeights(annotatedBlocks: blocks, config: config) else {
-            // Unsupported block type in this post — leave cache empty so the cell
-            // falls back to automaticDimension.
-            return
+        // Background warmup didn't get to this post in time — fall back to
+        // synchronous computation. Log the cost so we can tell sync misses
+        // apart from cache hits when reading the trace.
+        let t0 = CACurrentMediaTime()
+        let heights = BlockHeightCalculator.perBlockHeights(annotatedBlocks: blocks, config: config)
+        let ms = (CACurrentMediaTime() - t0) * 1000
+        if ms > 1 {
+            let nilCount = heights.filter { $0 == nil }.count
+            debugLog(
+                "syncPrecompute post#\(postId) blocks=\(blocks.count) entries=\(heights.count) unsupported=\(nilCount) \(String(format: "%.1f", ms))ms"
+            )
         }
         precomputedBlockHeights[postId] = heights
-        let spacing = NativeContentRenderer.contentStackSpacing
-        let contentH = heights.isEmpty ? 0 : heights.reduce(0, +) + CGFloat(heights.count - 1) * spacing
-        precomputedTotalHeights[postId] = PostNativeCell.chromeHeight() + contentH
+        // Total cell height is only computable when every block is measurable.
+        // Posts with one-off unsupported blocks (table/details/poll/rawHTML)
+        // still get per-paragraph pinning above; they just fall back to
+        // `automaticDimension` for the overall cell sizing.
+        if heights.allSatisfy({ $0 != nil }) {
+            let spacing = NativeContentRenderer.contentStackSpacing
+            let resolved = heights.compactMap { $0 }
+            let contentH = resolved.isEmpty ? 0 : resolved.reduce(0, +) + CGFloat(heights.count - 1) * spacing
+            precomputedTotalHeights[postId] = PostNativeCell.chromeHeight() + contentH
+        }
     }
 
     /// Drops cached heights for a post so the next display recomputes them.
@@ -1138,6 +1167,120 @@ extension TopicDetailViewController: UITableViewDelegate {
     func invalidatePrecomputedHeights(forPostId postId: Int) {
         precomputedBlockHeights.removeValue(forKey: postId)
         precomputedTotalHeights.removeValue(forKey: postId)
+    }
+
+    /// Pre-warm `precomputedBlockHeights` / `precomputedTotalHeights` on a
+    /// background queue for every parsed post that hasn't been measured yet.
+    /// Idempotent — only computes for missing entries. Safe to call multiple
+    /// times (e.g., from both `viewDidLayoutSubviews` and after each snapshot
+    /// apply when posts arrive incrementally).
+    ///
+    /// `BlockHeightCalculator` and `NSAttributedString.boundingRect` are both
+    /// thread-safe; we capture an immutable `NativeRenderConfig` on the main
+    /// thread (UIFont metrics) and let the worker walk the snapshotted blocks.
+    /// Results are merged back on the main thread, gated by the width tag so
+    /// stale results from a prior rotation don't pollute the current cache.
+    private func warmHeightCacheInBackground() {
+        let width = tableView.bounds.width
+        guard width > 0 else { return }
+        // Clear stale cache before scheduling new work.
+        if width != precomputedWidth {
+            precomputedBlockHeights.removeAll(keepingCapacity: true)
+            precomputedTotalHeights.removeAll(keepingCapacity: true)
+            precomputedWidth = width
+        }
+        // Snapshot the post -> blocks map for the work queue.
+        var pending: [(Int, [AnnotatedBlock])] = []
+        for (postId, blocks) in viewModel.parsedBlocks {
+            if precomputedBlockHeights[postId] == nil {
+                pending.append((postId, blocks))
+            }
+        }
+        guard !pending.isEmpty else {
+            // Useful as a heartbeat — confirms the trigger fires even when
+            // the cache is already warm. `debugLog` so it doesn't get swallowed
+            // by `FrameDropDetector`'s drop-only printing.
+            debugLog("heightWarmup skipped: all \(viewModel.parsedBlocks.count) parsed posts already cached")
+            return
+        }
+        // Skip if a warmup at the same width is already running — it will
+        // pick up these post IDs (we re-snapshot inside the worker).
+        if heightWarmupInFlightWidth == width {
+            debugLog("heightWarmup skipped: in-flight (pending would be \(pending.count))")
+            return
+        }
+        heightWarmupInFlightWidth = width
+        debugLog("heightWarmup dispatching posts=\(pending.count) width=\(Int(width))")
+
+        let config = NativeRenderConfig.default(contentWidth: width - 24, baseURL: baseURL)
+        let chrome = PostNativeCell.chromeHeight()
+        let stackSpacing = NativeContentRenderer.contentStackSpacing
+
+        heightWarmupQueue.async { [weak self] in
+            let t0 = CACurrentMediaTime()
+            var newHeights: [Int: [CGFloat?]] = [:]
+            var newTotals: [Int: CGFloat] = [:]
+            // Find the top-3 most expensive posts in this batch so we can see
+            // outliers in the trace without spamming a per-post line for
+            // every post in the topic.
+            var perPostMs: [(postId: Int, ms: Double, blocks: Int, nilCount: Int)] = []
+            for (postId, blocks) in pending {
+                let pt0 = CACurrentMediaTime()
+                let (heights, profile) = BlockHeightCalculator.perBlockHeightsProfiled(
+                    annotatedBlocks: blocks, config: config
+                )
+                let pms = (CACurrentMediaTime() - pt0) * 1000
+                let nilCount = heights.filter { $0 == nil }.count
+                perPostMs.append((postId, pms, blocks.count, nilCount))
+                // Per-type breakdown for slow posts so we can see exactly which
+                // block kind dominates (e.g., paragraph vs image vs onebox).
+                if pms > 10 {
+                    let breakdown = profile
+                        .sorted { $0.value.ms > $1.value.ms }
+                        .map { "\($0.key)x\($0.value.count)=\(String(format: "%.1f", $0.value.ms))ms" }
+                        .joined(separator: " ")
+                    debugLog("heightCalc post#\(postId) total=\(String(format: "%.1f", pms))ms blocks=\(blocks.count) byType: \(breakdown)")
+                }
+                // Always store, even when entries are nil — the per-block array
+                // still drives partial pinning, and storing prevents re-tries
+                // on the next warmup pass (which would otherwise loop forever
+                // for posts that contain unsupported blocks).
+                newHeights[postId] = heights
+                if heights.allSatisfy({ $0 != nil }) {
+                    let resolved = heights.compactMap { $0 }
+                    let contentH = resolved.isEmpty
+                        ? 0
+                        : resolved.reduce(0, +) + CGFloat(heights.count - 1) * stackSpacing
+                    newTotals[postId] = chrome + contentH
+                }
+            }
+            let elapsed = (CACurrentMediaTime() - t0) * 1000
+            let top = perPostMs
+                .sorted { $0.ms > $1.ms }
+                .prefix(3)
+                .map { "post#\($0.postId)=\(String(format: "%.1f", $0.ms))ms(blocks=\($0.blocks),nil=\($0.nilCount))" }
+                .joined(separator: " ")
+            DispatchQueue.main.async {
+                guard let self else { return }
+                // Discard if a width change happened while the worker ran.
+                if self.precomputedWidth == width {
+                    for (k, v) in newHeights { self.precomputedBlockHeights[k] = v }
+                    for (k, v) in newTotals { self.precomputedTotalHeights[k] = v }
+                }
+                self.heightWarmupInFlightWidth = 0
+                let unsupportedBlocks = newHeights.values.reduce(0) { acc, arr in
+                    acc + arr.filter { $0 == nil }.count
+                }
+                debugLog(
+                    "heightWarmup posts=\(pending.count) fullyPinned=\(newTotals.count) unsupportedBlocks=\(unsupportedBlocks) total=\(String(format: "%.1f", elapsed))ms top: \(top)"
+                )
+                // Posts that arrived during the in-flight worker weren't in
+                // its `pending` snapshot. Re-check; this is idempotent — every
+                // tried post is now in `precomputedBlockHeights`, so the
+                // pending filter excludes them and recursion terminates.
+                self.warmHeightCacheInBackground()
+            }
+        }
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {

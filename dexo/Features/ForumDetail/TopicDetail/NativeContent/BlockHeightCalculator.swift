@@ -22,11 +22,12 @@ enum BlockHeightCalculator {
         config: NativeRenderConfig,
         spacing: CGFloat = NativeContentRenderer.contentStackSpacing
     ) -> CGFloat? {
-        guard let heights = perBlockHeights(annotatedBlocks: annotatedBlocks, config: config) else {
-            return nil
-        }
+        let heights = perBlockHeights(annotatedBlocks: annotatedBlocks, config: config)
         if heights.isEmpty { return 0 }
-        return heights.reduce(0, +) + CGFloat(heights.count - 1) * spacing
+        // We can only return a total when every block is measurable.
+        let resolved = heights.compactMap { $0 }
+        guard resolved.count == heights.count else { return nil }
+        return resolved.reduce(0, +) + CGFloat(heights.count - 1) * spacing
     }
 
     /// Total height of a nested block stack (blockquote, discourseQuote inner
@@ -49,40 +50,87 @@ enum BlockHeightCalculator {
 
     /// Per-block heights aligned with the view sequence produced by
     /// `NativeContentRenderer.renderBlocks(_:config:delegate:pollProvider:)`.
-    /// Returns `nil` if any block type is unsupported.
     ///
-    /// Note: matches the consecutive-paragraph merge — N adjacent paragraphs
-    /// collapse into a single merged height entry, not N entries.
+    /// Always returns one entry per chunk (paragraph merge considered). Entries
+    /// are `nil` for block types the calculator can't measure (`table`,
+    /// `details`, `poll`, `rawHTML`). The renderer skips pinning for those
+    /// indices — surrounding paragraphs still get the precomputed-height fast
+    /// path. Previously a single unsupported block forced the entire post to
+    /// fall back to autosize.
     static func perBlockHeights(
         annotatedBlocks: [AnnotatedBlock],
         config: NativeRenderConfig
-    ) -> [CGFloat]? {
-        var result: [CGFloat] = []
+    ) -> [CGFloat?] {
+        perBlockHeightsProfiled(annotatedBlocks: annotatedBlocks, config: config).heights
+    }
+
+    /// Per-type timing aggregator returned alongside the heights array.
+    /// Use this from the background warmup so the trace can show *exactly*
+    /// where the time goes (paragraph chunks vs image vs onebox vs ...).
+    /// Sync callers stick with `perBlockHeights` and pay no overhead.
+    static func perBlockHeightsProfiled(
+        annotatedBlocks: [AnnotatedBlock],
+        config: NativeRenderConfig
+    ) -> (heights: [CGFloat?], profile: [String: (count: Int, ms: Double)]) {
+        var result: [CGFloat?] = []
+        var profile: [String: (count: Int, ms: Double)] = [:]
         var i = 0
         while i < annotatedBlocks.count {
             let annotated = annotatedBlocks[i]
 
-            // Mirror NativeContentRenderer's consecutive-paragraph merge.
+            // Mirror NativeContentRenderer's consecutive-paragraph merge,
+            // including the maxMergedParagraphChars cap so chunk boundaries
+            // (and thus the heights array) match the view sequence.
             if case .paragraph = annotated.block {
-                var j = i + 1
-                while j < annotatedBlocks.count, case .paragraph = annotatedBlocks[j].block {
-                    j += 1
+                let j = NativeContentRenderer.paragraphRunEnd(
+                    annotatedBlocks: annotatedBlocks, startIndex: i
+                )
+                let t0 = CACurrentMediaTime()
+                if j > i, let h = mergedParagraphHeight(annotatedBlocks[i..<j], config: config) {
+                    result.append(h)
+                } else {
+                    result.append(nil)
                 }
-                guard let h = mergedParagraphHeight(annotatedBlocks[i..<j], config: config) else {
-                    return nil
-                }
-                result.append(h)
-                i = j
+                let ms = (CACurrentMediaTime() - t0) * 1000
+                var entry = profile["paragraph", default: (0, 0)]
+                entry.count += 1
+                entry.ms += ms
+                profile["paragraph"] = entry
+                i = max(j, i + 1)
                 continue
             }
 
-            guard let h = height(for: annotated.block, config: config) else {
-                return nil
-            }
-            result.append(h)
+            let t0 = CACurrentMediaTime()
+            result.append(height(for: annotated.block, config: config))
+            let ms = (CACurrentMediaTime() - t0) * 1000
+            let key = blockTypeName(annotated.block)
+            var entry = profile[key, default: (0, 0)]
+            entry.count += 1
+            entry.ms += ms
+            profile[key] = entry
             i += 1
         }
-        return result
+        return (result, profile)
+    }
+
+    private static func blockTypeName(_ block: ContentBlock) -> String {
+        switch block {
+        case .paragraph: return "paragraph"
+        case .heading: return "heading"
+        case .codeBlock: return "codeBlock"
+        case .blockquote: return "blockquote"
+        case .discourseQuote: return "discourseQuote"
+        case .image: return "image"
+        case .divider: return "divider"
+        case .list: return "list"
+        case .video: return "video"
+        case .spoiler: return "spoiler"
+        case .onebox: return "onebox"
+        case .table: return "table"
+        case .details: return "details"
+        case .poll: return "poll"
+        case .rawHTML: return "rawHTML"
+        }
     }
 
     /// Height of a single block at `config.contentWidth`. Returns `nil` for
