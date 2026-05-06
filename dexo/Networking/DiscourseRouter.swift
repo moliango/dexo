@@ -7,7 +7,7 @@ enum DiscourseRouter {
     case topTopics(page: Int)
     case readTopics(page: Int)
     case categories
-    case topic(id: Int, nearPostNumber: Int? = nil)
+    case topic(id: Int, nearPostNumber: Int? = nil, filter: String? = nil)
     case topicPosts(topicId: Int, postIds: [Int])
     case post(id: Int)
     case notifications(limit: Int? = nil, filter: String? = nil)
@@ -69,15 +69,24 @@ enum DiscourseRouter {
             return "/read.json?page=\(page)"
         case .categories:
             return "/categories.json?include_subcategories=true"
-        case .topic(let id, let nearPostNumber):
+        case .topic(let id, let nearPostNumber, let filter):
             // `/t/{id}/{N}.json` returns a batch of posts ending at floor N — used
             // for deep-link entry (notification tap, reply jump) so we avoid
             // fetching the OP batch just to throw it away. `track_visit` updates
             // read state; `forceLoad` bypasses cache so a just-created reply shows.
+            var params: [String] = []
+            let basePath: String
             if let nearPostNumber, nearPostNumber > 1 {
-                return "/t/\(id)/\(nearPostNumber).json?track_visit=true&forceLoad=true"
+                basePath = "/t/\(id)/\(nearPostNumber).json"
+                params.append("track_visit=true")
+                params.append("forceLoad=true")
+            } else {
+                basePath = "/t/\(id).json"
             }
-            return "/t/\(id).json"
+            if let filter, !filter.isEmpty {
+                params.append("filter=\(filter)")
+            }
+            return params.isEmpty ? basePath : basePath + "?" + params.joined(separator: "&")
         case .topicPosts(let topicId, let postIds):
             let ids = postIds.map { "post_ids[]=\($0)" }.joined(separator: "&")
             return "/t/\(topicId)/posts.json?\(ids)"

@@ -80,8 +80,8 @@ final class DiscourseAPI {
         try await request(route: .privateMessages(username: username))
     }
 
-    func fetchTopic(id: Int, nearPostNumber: Int? = nil) async throws -> DiscourseTopicDetail {
-        try await request(route: .topic(id: id, nearPostNumber: nearPostNumber))
+    func fetchTopic(id: Int, nearPostNumber: Int? = nil, filter: String? = nil) async throws -> DiscourseTopicDetail {
+        try await request(route: .topic(id: id, nearPostNumber: nearPostNumber, filter: filter))
     }
 
     func fetchTopicPosts(topicId: Int, postIds: [Int]) async throws -> DiscourseTopicPostsResponse {

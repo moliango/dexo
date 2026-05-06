@@ -13,6 +13,8 @@ final class TopicDetailViewModel {
     var isLoadingMore = false
     var isLoadingEarlier = false
     var isFilteringByOP = false
+    var isReverseOrder = false
+    var isSummaryMode = false
     var isJumping = false
     var jumpTargetFloor: Int?
     var expandedBoostPostIds: Set<Int> = []
@@ -25,6 +27,8 @@ final class TopicDetailViewModel {
     private(set) var loadedRangeEnd: Int = 0
     /// Cached first post (OP) to preserve across jumpToFloor
     private var firstPost: DiscourseTopicDetail.Post?
+    /// Last loaded topic id — needed for summary toggle which has to re-fetch.
+    private var lastLoadedTopicId: Int?
 
     init(api: DiscourseAPI) {
         self.api = api
@@ -46,9 +50,16 @@ final class TopicDetailViewModel {
     }
 
     var visiblePosts: [DiscourseTopicDetail.Post] {
-        let base = posts.filter { ($0.actionCode ?? "").isEmpty }
+        var base = posts.filter { ($0.actionCode ?? "").isEmpty }
         if isFilteringByOP, let op = opUsername {
-            return base.filter { $0.username == op }
+            base = base.filter { $0.username == op }
+        }
+        if isReverseOrder {
+            // Pin OP at top, then the rest of loaded posts in reverse —
+            // newest immediately below OP, oldest non-OP at the bottom.
+            let op = base.first(where: { $0.postNumber == 1 })
+            let rest = Array(base.filter { $0.postNumber != 1 }.reversed())
+            return op.map { [$0] + rest } ?? rest
         }
         return base
     }
@@ -95,8 +106,10 @@ final class TopicDetailViewModel {
         errorMessage = nil
         parsedBlocks = [:]
         postsById = [:]
+        lastLoadedTopicId = id
+        let filter = isSummaryMode ? "summary" : nil
         do {
-            let detail = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber)
+            let detail = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber, filter: filter)
             topic = detail
 
             // Save the full stream of post IDs
@@ -157,6 +170,72 @@ final class TopicDetailViewModel {
         }
 
         isLoading = false
+    }
+
+    /// Flip "by heat" mode and re-fetch the topic with `filter=summary`.
+    /// Re-fetch is required because summary view is server-filtered, not a
+    /// client-side reorder. Caller is responsible for invalidating its caches.
+    func toggleSummaryMode(containerWidth: CGFloat) async {
+        guard let topicId = lastLoadedTopicId ?? topic?.id else { return }
+        isSummaryMode.toggle()
+        await loadTopic(id: topicId, containerWidth: containerWidth)
+    }
+
+    /// Switch into reverse-order view. Clears the currently loaded posts,
+    /// re-fetches OP + the last batch (so the bottom of the canonical stream
+    /// becomes the top of the reversed list, with OP pinned above it). The
+    /// user then scrolls down to load progressively older posts via the
+    /// existing `loadEarlierPosts` path (the controller swaps the pagination
+    /// trigger direction while reverse is on).
+    func enableReverseOrder(containerWidth: CGFloat) async {
+        guard !allPostIds.isEmpty, let topicId = topic?.id else {
+            isReverseOrder = true
+            return
+        }
+
+        let lastBatchSize = 20
+        let lastBatchStart = max(allPostIds.count - lastBatchSize, 0)
+        let lastBatchIds = Array(allPostIds[lastBatchStart..<allPostIds.count])
+        var batchIds: [Int] = []
+        if let opId = allPostIds.first {
+            batchIds.append(opId)
+        }
+        for id in lastBatchIds where !batchIds.contains(id) {
+            batchIds.append(id)
+        }
+
+        isReverseOrder = true
+        isJumping = true
+        topic?.postStream.posts.removeAll()
+        parsedBlocks.removeAll()
+        postsById.removeAll()
+        loadedPostIds.removeAll()
+
+        do {
+            let response = try await api.fetchTopicPosts(topicId: topicId, postIds: batchIds)
+            let idOrder = Dictionary(uniqueKeysWithValues: allPostIds.enumerated().map { ($1, $0) })
+            let sortedPosts = response.postStream.posts.sorted { (idOrder[$0.id] ?? 0) < (idOrder[$1.id] ?? 0) }
+
+            topic?.postStream.posts = sortedPosts
+            for post in sortedPosts {
+                loadedPostIds.insert(post.id)
+                parseAndStore(post: post)
+            }
+            if let op = sortedPosts.first(where: { $0.postNumber == 1 }) {
+                firstPost = op
+            }
+            // Range tracks the canonical window we've loaded — the last batch.
+            // OP being separately included doesn't extend it; loadEarlierPosts
+            // will pull in the gap toward post 1 as the user scrolls.
+            loadedRangeStart = lastBatchStart
+            loadedRangeEnd = allPostIds.count
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+
+        isJumping = false
+        if isReady { isReady = false }
+        isReady = true
     }
 
     func loadMorePosts(containerWidth: CGFloat) async {

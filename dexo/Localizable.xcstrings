@@ -225,6 +225,38 @@
         }
       }
     },
+    "topic.bottombar.reverse_order" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reverse order"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "倒序查看"
+          }
+        }
+      }
+    },
+    "topic.bottombar.summary_view" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "By heat"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按热度查看"
+          }
+        }
+      }
+    },
     "action.open" : {
       "extractionState" : "stale",
       "localizations" : {

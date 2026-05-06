@@ -4,7 +4,12 @@ protocol TopicDetailBottomBarDelegate: AnyObject {
     func bottomBarDidTapScrollToTop()
     func bottomBarDidTapOPOnly()
     func bottomBarDidTapJumpToFloor()
+    func bottomBarDidToggleReverseOrder()
+    func bottomBarDidToggleSummaryMode()
     func bottomBarDidTapReply()
+    /// Whether the reverse / summary modes are currently active (for menu state).
+    var bottomBarIsReverseOrder: Bool { get }
+    var bottomBarIsSummaryMode: Bool { get }
 }
 
 final class TopicDetailBottomBar: UIView {
@@ -37,6 +42,11 @@ final class TopicDetailBottomBar: UIView {
         opOnlyButton.addTarget(self, action: #selector(opOnlyTapped), for: .touchUpInside)
         jumpToFloorButton.addTarget(self, action: #selector(jumpToFloorTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyTapped), for: .touchUpInside)
+
+        // Long-press menu on jump-to-floor: tap still fires touchUpInside
+        // (showsMenuAsPrimaryAction = false), long-press opens the menu.
+        jumpToFloorButton.showsMenuAsPrimaryAction = false
+        jumpToFloorButton.menu = makeJumpMenu()
 
         let size = Self.buttonSize
         NSLayoutConstraint.activate([
@@ -156,6 +166,33 @@ final class TopicDetailBottomBar: UIView {
 
     @objc private func jumpToFloorTapped() {
         delegate?.bottomBarDidTapJumpToFloor()
+    }
+
+    /// Refresh the long-press menu so checkmarks reflect current modes.
+    func refreshJumpMenu() {
+        jumpToFloorButton.menu = makeJumpMenu()
+    }
+
+    private func makeJumpMenu() -> UIMenu {
+        let isReverse = delegate?.bottomBarIsReverseOrder ?? false
+        let isSummary = delegate?.bottomBarIsSummaryMode ?? false
+        let reverseAction = UIAction(
+            title: String(localized: "topic.bottombar.reverse_order"),
+            image: UIImage(systemName: "arrow.up.arrow.down"),
+            state: isReverse ? .on : .off
+        ) { [weak self] _ in
+            self?.delegate?.bottomBarDidToggleReverseOrder()
+            self?.refreshJumpMenu()
+        }
+        let summaryAction = UIAction(
+            title: String(localized: "topic.bottombar.summary_view"),
+            image: UIImage(systemName: "flame"),
+            state: isSummary ? .on : .off
+        ) { [weak self] _ in
+            self?.delegate?.bottomBarDidToggleSummaryMode()
+            self?.refreshJumpMenu()
+        }
+        return UIMenu(title: "", children: [reverseAction, summaryAction])
     }
 
     @objc private func replyTapped() {

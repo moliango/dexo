@@ -761,8 +761,8 @@ final class TopicDetailViewController: ObservableViewController {
             let button = UIButton(type: .system)
             var config = UIButton.Configuration.filled()
             config.title = tag.name
-            config.baseForegroundColor = .secondaryLabel
-            config.baseBackgroundColor = .secondarySystemFill
+            config.baseForegroundColor = ThemeManager.shared.accentColor
+            config.baseBackgroundColor = ThemeManager.shared.codeBackgroundColor
             config.cornerStyle = .capsule
             config.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10)
             config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
@@ -1104,6 +1104,46 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
     func bottomBarDidTapReply() {
         replyButtonTapped()
     }
+
+    var bottomBarIsReverseOrder: Bool { viewModel.isReverseOrder }
+    var bottomBarIsSummaryMode: Bool { viewModel.isSummaryMode }
+
+    func bottomBarDidToggleReverseOrder() {
+        if viewModel.isReverseOrder {
+            // Turning OFF — keep loaded data, just flip the flag. Existing
+            // `loadEarlier` / `loadMore` direction returns to canonical.
+            viewModel.isReverseOrder = false
+            return
+        }
+        // Turning ON — clear caches and re-fetch OP + last batch.
+        hasTitleHeader = false
+        suppressLoadEarlier = true
+        cellHeightCache.removeAll()
+        contentViewCache.removeAll()
+        precomputedBlockHeights.removeAll()
+        precomputedTotalHeights.removeAll()
+        showJumpOverlay()
+        Task {
+            await viewModel.enableReverseOrder(containerWidth: view.bounds.width)
+            hideJumpOverlay()
+        }
+    }
+
+    func bottomBarDidToggleSummaryMode() {
+        // Summary view is a server-filtered re-fetch — invalidate everything
+        // that would otherwise hold stale per-floor state.
+        hasTitleHeader = false
+        suppressLoadEarlier = true
+        cellHeightCache.removeAll()
+        contentViewCache.removeAll()
+        precomputedBlockHeights.removeAll()
+        precomputedTotalHeights.removeAll()
+        showJumpOverlay()
+        Task {
+            await viewModel.toggleSummaryMode(containerWidth: view.bounds.width)
+            hideJumpOverlay()
+        }
+    }
 }
 
 // MARK: - UITableViewDelegate
@@ -1316,11 +1356,14 @@ extension TopicDetailViewController: UITableViewDelegate {
         }
 
         // Only trigger load-earlier when user is actively scrolling UP
-        // and within 200pt of the top — prevents false triggers after jump
+        // and within 200pt of the top — prevents false triggers after jump.
+        // In reverse mode the top is the pinned OP; loading "earlier"
+        // from there is meaningless, so skip the trigger entirely.
         guard isScrollingUp,
               !suppressLoadEarlier,
               viewModel.canLoadEarlier,
-              !isLoadingEarlierLocally
+              !isLoadingEarlierLocally,
+              !viewModel.isReverseOrder
         else { return }
         let contentTop = -(scrollView.adjustedContentInset.top)
         if scrollView.contentOffset.y <= contentTop + 200 {
@@ -1357,10 +1400,16 @@ extension TopicDetailViewController: UITableViewDelegate {
         }
 
         let totalRows = tableView.numberOfRows(inSection: 0)
-        // Load more (forward) — trigger on the last row so the spinner is visible
+        // Load more (forward) — trigger on the last row so the spinner is visible.
+        // In reverse mode the bottom of the table is the oldest non-OP loaded
+        // post, so what the user wants next is canonically *earlier* posts.
         if indexPath.row >= totalRows - 1 {
             Task {
-                await viewModel.loadMorePosts(containerWidth: view.bounds.width)
+                if viewModel.isReverseOrder {
+                    await viewModel.loadEarlierPosts(containerWidth: view.bounds.width)
+                } else {
+                    await viewModel.loadMorePosts(containerWidth: view.bounds.width)
+                }
             }
         }
     }
