@@ -709,7 +709,14 @@ final class TopicDetailViewController: ObservableViewController {
             // applied. Going through `viewDidLayoutSubviews` added a hop that
             // didn't always fire; performing the scroll here runs every time
             // the target floor changes.
-            if let targetFloor = viewModel.jumpTargetFloor {
+            //
+            // Skip while a jump's network fetch is still in flight: clearing
+            // posts at the start of `jumpToFloor` itself fires `updateUI` with
+            // an empty snapshot. Without the `isJumping` guard, that intermediate
+            // pass consumes `jumpTargetFloor` and `performJumpScroll` no-ops
+            // (no visible row matches the target) — so when the batch finally
+            // lands there is nothing left to scroll on.
+            if !viewModel.isJumping, let targetFloor = viewModel.jumpTargetFloor {
                 viewModel.jumpTargetFloor = nil
                 let position = nextJumpPosition
                 nextJumpPosition = .top

@@ -29,6 +29,13 @@ final class TopicDetailViewModel {
     private var firstPost: DiscourseTopicDetail.Post?
     /// Last loaded topic id — needed for summary toggle which has to re-fetch.
     private var lastLoadedTopicId: Int?
+    /// Bumped whenever the loaded-post window is reset (loadTopic, jumpToFloor,
+    /// enableReverseOrder). In-flight pagination requests captured before the
+    /// reset compare against this and discard their response, otherwise stale
+    /// posts get inserted into the new window — e.g. after jumping to floor 1
+    /// from deep in the topic, an earlier `loadEarlierPosts` would prepend
+    /// floors from the prior window in front of the OP.
+    private var loadGeneration: UInt = 0
 
     init(api: DiscourseAPI) {
         self.api = api
@@ -107,6 +114,7 @@ final class TopicDetailViewModel {
         parsedBlocks = [:]
         postsById = [:]
         lastLoadedTopicId = id
+        loadGeneration &+= 1
         let filter = isSummaryMode ? "summary" : nil
         do {
             let detail = try await api.fetchTopic(id: id, nearPostNumber: nearPostNumber, filter: filter)
@@ -206,6 +214,7 @@ final class TopicDetailViewModel {
 
         isReverseOrder = true
         isJumping = true
+        loadGeneration &+= 1
         topic?.postStream.posts.removeAll()
         parsedBlocks.removeAll()
         postsById.removeAll()
@@ -242,6 +251,7 @@ final class TopicDetailViewModel {
         guard !isLoadingMore, canLoadMore, let topicId = topic?.id else { return }
         isLoadingMore = true
 
+        let capturedGeneration = loadGeneration
         let newEnd = min(loadedRangeEnd + 20, allPostIds.count)
         let batch = Array(allPostIds[loadedRangeEnd..<newEnd])
 
@@ -252,6 +262,15 @@ final class TopicDetailViewModel {
 
         do {
             let response = try await api.fetchTopicPosts(topicId: topicId, postIds: batch)
+
+            // Window was reset while this request was in flight (jumpToFloor,
+            // reverse-order, summary toggle, topic reload). Discard the response
+            // so we don't merge posts from the old window into the new one.
+            guard loadGeneration == capturedGeneration else {
+                isLoadingMore = false
+                return
+            }
+
             let newPosts = response.postStream.posts.filter { !loadedPostIds.contains($0.id) }
 
             guard !newPosts.isEmpty else {
@@ -284,6 +303,7 @@ final class TopicDetailViewModel {
         guard canLoadEarlier, !isLoadingEarlier, let topicId = topic?.id else { return }
         isLoadingEarlier = true
 
+        let capturedGeneration = loadGeneration
         let newStart = max(0, loadedRangeStart - 20)
         let batch = Array(allPostIds[newStart..<loadedRangeStart])
 
@@ -294,6 +314,16 @@ final class TopicDetailViewModel {
 
         do {
             let response = try await api.fetchTopicPosts(topicId: topicId, postIds: batch)
+
+            // Window was reset while this request was in flight — discard, or
+            // the stale batch gets inserted in front of whatever the reset
+            // loaded (e.g. floors N-20..N-1 prepended before floor 1 after
+            // jumping to the OP).
+            guard loadGeneration == capturedGeneration else {
+                isLoadingEarlier = false
+                return
+            }
+
             let newPosts = response.postStream.posts.filter { !loadedPostIds.contains($0.id) }
 
             guard !newPosts.isEmpty else {
@@ -341,6 +371,7 @@ final class TopicDetailViewModel {
 
         isJumping = true
         jumpTargetFloor = floor
+        loadGeneration &+= 1
 
         // Clear current posts
         topic?.postStream.posts.removeAll()
