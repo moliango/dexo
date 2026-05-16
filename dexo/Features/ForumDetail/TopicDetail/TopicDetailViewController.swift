@@ -282,6 +282,7 @@ final class TopicDetailViewController: ObservableViewController {
             let showsSeparator = !isBoostsExpanded
             let cachedViews = self.contentViewCache[postId]
             self.precomputeHeights(forPostId: postId, blocks: annotatedBlocks, config: config, tableWidth: tableView.bounds.width)
+            let isOP = post.username == self.viewModel.opUsername
             cell.configure(
                 with: post,
                 annotatedBlocks: annotatedBlocks,
@@ -296,7 +297,8 @@ final class TopicDetailViewController: ObservableViewController {
                 isBoostsExpanded: isBoostsExpanded,
                 showsSeparator: showsSeparator,
                 precomputedBlockHeights: self.precomputedBlockHeights[postId],
-                hidesLikeButton: self.hidesLikeButton
+                hidesLikeButton: self.hidesLikeButton,
+                isOP: isOP
             )
             // Cache newly rendered views for future reuse
             if cachedViews == nil {

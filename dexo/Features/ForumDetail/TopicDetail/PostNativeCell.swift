@@ -439,6 +439,7 @@ final class PostNativeCell: UITableViewCell {
         showsSeparator: Bool,
         precomputedBlockHeights: [CGFloat?]? = nil,
         hidesLikeButton: Bool = false,
+        isOP: Bool = false,
     ) {
         let fm = FontManager.shared
         let avatarSize = fm.scaled(Self.baseAvatarSize)
@@ -457,7 +458,7 @@ final class PostNativeCell: UITableViewCell {
         self.validReactions = validReactions
         separatorLine.isHidden = !showsSeparator
 
-        if post.postNumber == 1 {
+        if isOP {
             let attr = NSMutableAttributedString(
                 string: post.name ?? post.username,
                 attributes: [.font: FontManager.shared.font(size: 14, weight: .semibold)]
