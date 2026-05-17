@@ -2099,6 +2099,48 @@ extension TopicDetailViewController: PostCellDelegate {
         }
     }
 
+    func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post) {
+        guard let replyPostNumber = post.replyToPostNumber, replyPostNumber > 0 else { return }
+        // Map post-number → ID. `allPostIds` is the full topic stream the
+        // server returned, so floor `N` lives at index `N - 1`.
+        let index = replyPostNumber - 1
+        guard index >= 0, index < viewModel.allPostIds.count else { return }
+        let targetId = viewModel.allPostIds[index]
+
+        // Already loaded in the current window → present immediately.
+        if let parent = viewModel.postsById[targetId] {
+            presentReplyPreview(for: parent)
+            return
+        }
+
+        // Not loaded yet — fetch by ID before presenting.
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let parent = try await self.api.fetchPost(id: targetId)
+                self.presentReplyPreview(for: parent)
+            } catch {
+                debugLog("[ReplyPreview] fetchPost(\(targetId)) failed: \(error)")
+            }
+        }
+    }
+
+    private func presentReplyPreview(for post: DiscourseTopicDetail.Post) {
+        let preview = ReplyPreviewViewController(
+            api: api,
+            post: post,
+            topicId: topicId,
+            validReactions: viewModel.topic?.validReactions ?? [],
+            floorNumber: post.postNumber
+        )
+        let nav = UINavigationController(rootViewController: preview)
+        if let sheet = nav.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(nav, animated: true)
+    }
+
     private func refreshBoostUI() {
         updateUI()
         tableView.reloadData()

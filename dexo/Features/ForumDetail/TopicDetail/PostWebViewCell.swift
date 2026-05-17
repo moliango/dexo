@@ -6,6 +6,8 @@ protocol PostCellDelegate: AnyObject {
     func postCell(didTapShowRepliesForPostId postId: Int)
     func postCell(didTapToggleDetails detailsIndex: Int, postId: Int)
     func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post)
+    /// Tap the "↩︎ @username" badge on a reply cell to preview the post being replied to.
+    func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post)
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool)
     func postCell(didTapAvatarForUsername username: String)
     func postCell(didTapReaction reactionId: String, forPost post: DiscourseTopicDetail.Post)

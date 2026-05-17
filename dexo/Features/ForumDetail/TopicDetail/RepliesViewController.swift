@@ -346,6 +346,11 @@ extension RepliesViewController: PostCellDelegate {
         }
     }
 
+    func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post) {
+        // The replies list is already a "what replied to what" view — chasing
+        // the parent reference here would duplicate that context. No-op.
+    }
+
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool) {
         Task {
             do {

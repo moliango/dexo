@@ -144,6 +144,7 @@ final class PostNativeCell: UITableViewCell {
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
+        label.isUserInteractionEnabled = true
         return label
     }()
 
@@ -406,6 +407,9 @@ final class PostNativeCell: UITableViewCell {
         avatarImageView.isUserInteractionEnabled = true
         let avatarTap = UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
         avatarImageView.addGestureRecognizer(avatarTap)
+
+        let replyRefTap = UITapGestureRecognizer(target: self, action: #selector(replyReferenceTapped))
+        replyToLabel.addGestureRecognizer(replyRefTap)
 
         let cellLongPress = UILongPressGestureRecognizer(target: self, action: #selector(cellLongPressed(_:)))
         contentView.addGestureRecognizer(cellLongPress)
@@ -820,6 +824,11 @@ final class PostNativeCell: UITableViewCell {
     @objc private func avatarTapped() {
         guard let username = currentPost?.username else { return }
         delegate?.postCell(didTapAvatarForUsername: username)
+    }
+
+    @objc private func replyReferenceTapped() {
+        guard let post = currentPost, post.replyToPostNumber != nil else { return }
+        delegate?.postCell(didTapReplyReferenceForPost: post)
     }
 
     @objc private func cellLongPressed(_ gesture: UILongPressGestureRecognizer) {
