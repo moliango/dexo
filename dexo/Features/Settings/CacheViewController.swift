@@ -60,7 +60,10 @@ final class CacheViewController: BaseViewController {
 
     private struct CacheRow {
         let titleKey: String
-        let cache: SDImageCache
+        /// nil for the catch-all "other caches" row (URLCache, WKWebView, etc.)
+        /// — those have no individual SDImageCache and can only be cleared via
+        /// "Clear All".
+        let cache: SDImageCache?
         var count: UInt = 0
         var bytes: UInt = 0
     }
@@ -82,6 +85,7 @@ final class CacheViewController: BaseViewController {
             CacheRow(titleKey: "cache.avatars", cache: cacheManager.avatarCache),
             CacheRow(titleKey: "cache.emoji", cache: cacheManager.emojiCache),
             CacheRow(titleKey: "cache.content", cache: cacheManager.contentCache),
+            CacheRow(titleKey: "cache.other", cache: nil),
         ]
 
         view.addSubview(ringContainer)
@@ -145,10 +149,18 @@ final class CacheViewController: BaseViewController {
                 self.rows[i].count = info.count
                 self.rows[i].bytes = info.bytes
             }
-            self.totalCount = infos.reduce(0) { $0 + $1.count }
-            // Total from disk scan to capture all caches (URLCache, WKWebView, etc.)
-            self.totalBytes = Self.directorySize(url: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first)
+            // Total from disk scan captures everything Clear All wipes
+            // (URLCache, WKWebView, misc). The "other" row absorbs whatever
+            // isn't accounted for by the three SDImageCache namespaces so the
+            // rows always sum to the ring total.
+            let imageBytes = infos.reduce(0) { $0 + $1.bytes }
+            let diskTotal = Self.directorySize(url: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first)
                 + Self.directorySize(url: URL(fileURLWithPath: NSTemporaryDirectory()))
+            let otherIndex = self.rows.count - 1
+            self.rows[otherIndex].bytes = diskTotal > imageBytes ? diskTotal - imageBytes : 0
+            self.rows[otherIndex].count = 0
+            self.totalBytes = self.rows.reduce(0) { $0 + $1.bytes }
+            self.totalCount = infos.reduce(0) { $0 + $1.count }
             self.isCalculating = false
             self.stopSpinAnimation()
             self.animateSizeLabel(bytes: self.totalBytes, count: self.totalCount)
@@ -214,11 +226,10 @@ final class CacheViewController: BaseViewController {
     // MARK: - Clear
 
     private func clearSingleCache(at index: Int) {
-        guard clearingIndex == nil else { return }
+        guard clearingIndex == nil, let cache = rows[index].cache else { return }
         clearingIndex = index
         tableView.reloadRows(at: [IndexPath(row: index, section: 0)], with: .none)
 
-        let cache = rows[index].cache
         cache.clearMemory()
         cache.clearDisk { [weak self] in
             guard let self else { return }
@@ -374,9 +385,15 @@ extension CacheViewController: UITableViewDataSource {
             cell.selectionStyle = .none
         } else {
             let sizeStr = Self.formatter.string(fromByteCount: Int64(row.bytes))
-            cell.detailTextLabel?.text = "\(sizeStr) · \(row.count)"
+            // "Other" row has no item count and can't be cleared individually.
+            if row.cache == nil {
+                cell.detailTextLabel?.text = sizeStr
+                cell.selectionStyle = .none
+            } else {
+                cell.detailTextLabel?.text = "\(sizeStr) · \(row.count)"
+                cell.selectionStyle = row.bytes > 0 ? .default : .none
+            }
             cell.detailTextLabel?.textColor = .secondaryLabel
-            cell.selectionStyle = row.bytes > 0 ? .default : .none
         }
         return cell
     }
@@ -393,7 +410,7 @@ extension CacheViewController: UITableViewDelegate {
             confirmClear(title: String(localized: "cache.clear_all")) { [weak self] in
                 self?.clearAllCaches()
             }
-        } else if rows[indexPath.row].bytes > 0 {
+        } else if rows[indexPath.row].bytes > 0, rows[indexPath.row].cache != nil {
             let row = rows[indexPath.row]
             let name = String(localized: String.LocalizationValue(row.titleKey))
             confirmClear(title: name) { [weak self] in
