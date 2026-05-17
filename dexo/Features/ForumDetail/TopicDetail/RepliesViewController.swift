@@ -376,8 +376,8 @@ extension RepliesViewController: PostCellDelegate {
                 try await api.toggleReaction(postId: post.id, reactionId: reactionId)
                 await refreshPost(id: post.id)
             } catch {
-                // Optimistic UI — server state will reconcile on next refresh
                 debugLog("didTapReaction 发生错误: \(error)")
+                presentChallengePromptIfNeeded(error: error)
             }
         }
     }
@@ -392,7 +392,7 @@ extension RepliesViewController: PostCellDelegate {
                 }
                 await refreshPost(id: post.id)
             } catch {
-                // Optimistic UI — server state will reconcile on next refresh
+                presentChallengePromptIfNeeded(error: error)
             }
         }
     }
@@ -458,6 +458,9 @@ extension RepliesViewController: PostCellDelegate {
                     }
                     self.refreshBoostUI()
                 } catch {
+                    if self.presentChallengePromptIfNeeded(error: error) {
+                        return
+                    }
                     let failureAlert = UIAlertController(
                         title: String(localized: "reply.send.failed"),
                         message: error.localizedDescription,
@@ -533,6 +536,9 @@ extension RepliesViewController: PostCellDelegate {
                     self.expandedBoostPostIds.insert(post.id)
                     self.refreshBoostUI()
                 } catch {
+                    if self.presentChallengePromptIfNeeded(error: error) {
+                        return
+                    }
                     let failureAlert = UIAlertController(
                         title: String(localized: "reply.send.failed"),
                         message: error.localizedDescription,

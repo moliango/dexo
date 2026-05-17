@@ -28,8 +28,15 @@ final class NotificationPoller {
     private var sharedSessionKey: String?
     private var seeded = false
 
+    // Circuit breaker: stop polling after repeated failures (e.g. TLS errors on
+    // the MessageBus host) so a broken endpoint doesn't keep burning requests.
+    // Reset when the app returns to the foreground.
+    private var consecutiveFailures = 0
+    private var circuitOpen = false
+    private static let maxConsecutiveFailures = 5
+
     private static let initialDelay: TimeInterval = 3
-    private static let pollInterval: TimeInterval = 60
+    private static let pollInterval: TimeInterval = 15
 
     init(api: DiscourseAPI, usernameProvider: @escaping () -> String?) {
         self.api = api
@@ -64,6 +71,10 @@ final class NotificationPoller {
     // MARK: - Foreground / Background
 
     @objc private func appDidBecomeActive() {
+        // Give the tripped circuit another chance when the user returns —
+        // network conditions may have changed (e.g. proxy reconfigured).
+        circuitOpen = false
+        consecutiveFailures = 0
         startPolling(delay: Self.initialDelay)
     }
 
@@ -88,8 +99,9 @@ final class NotificationPoller {
 
             guard self.userId != nil else { return }
 
-            while !Task.isCancelled, self.isActive {
+            while !Task.isCancelled, self.isActive, !self.circuitOpen {
                 await self.pollMessageBus()
+                if self.circuitOpen { break }
                 try? await Task.sleep(nanoseconds: UInt64(Self.pollInterval * 1_000_000_000))
             }
         }
@@ -158,9 +170,19 @@ final class NotificationPoller {
         let channel = "/notification/\(userId)"
         let pollChannels = [channel: lastMessageIds[channel] ?? -1]
 
-        guard let messages = try? await api.pollMessageBus(clientId: clientId, channels: pollChannels, sharedSessionKey: sharedSessionKey) else {
+        let messages: [MessageBusMessage]
+        do {
+            messages = try await api.pollMessageBus(clientId: clientId, channels: pollChannels, sharedSessionKey: sharedSessionKey)
+        } catch {
+            consecutiveFailures += 1
+            debugLog("[MessageBus] poll failed (\(consecutiveFailures)/\(Self.maxConsecutiveFailures)): \(error)")
+            if consecutiveFailures >= Self.maxConsecutiveFailures {
+                circuitOpen = true
+                debugLog("[MessageBus] circuit opened — pausing polling until next foreground")
+            }
             return false
         }
+        consecutiveFailures = 0
 
         for msg in messages {
             if let positions = msg.statusChannelPositions {

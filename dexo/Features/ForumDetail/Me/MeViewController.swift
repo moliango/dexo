@@ -191,6 +191,10 @@ final class MeViewController: ObservableViewController {
         }
     }
 
+    private func presentChallenge() {
+        ChallengeViewController.present(from: self)
+    }
+
     private func loginTapped() {
         authGate?.requireAuth { [weak self] in
             guard let self else { return }
@@ -246,12 +250,18 @@ extension MeViewController: UITableViewDataSource {
         switch section {
         case 0:
             let isLoggedIn = authGate?.isAuthenticated() ?? false
-            return isLoggedIn ? 3 : 0
+            guard isLoggedIn else { return 0 }
+            return showChallengeRow ? 4 : 3
         case 1:
             return 1
         default:
             return 0
         }
+    }
+
+    private var showChallengeRow: Bool {
+        guard api.isLinuxDo else { return false }
+        return KeychainHelper.getUserApiKey(for: api.baseURL) == AuthManager.webAuthSentinel
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -271,6 +281,9 @@ extension MeViewController: UITableViewDataSource {
             case 2:
                 content.image = UIImage(systemName: "checkmark.circle")
                 content.text = String(localized: "me.read")
+            case 3:
+                content.image = UIImage(systemName: "shield")
+                content.text = String(localized: "me.challenge")
             default:
                 break
             }
@@ -327,6 +340,8 @@ extension MeViewController: UITableViewDelegate {
             case 2:
                 let vc = ReadTopicsViewController(api: api)
                 navigationController?.pushViewController(vc, animated: true)
+            case 3:
+                presentChallenge()
             default:
                 break
             }

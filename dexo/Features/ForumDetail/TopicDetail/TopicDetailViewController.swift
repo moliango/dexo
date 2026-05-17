@@ -1987,7 +1987,7 @@ extension TopicDetailViewController: PostCellDelegate {
                 try await api.toggleReaction(postId: post.id, reactionId: reactionId)
                 await refreshPost(id: post.id)
             } catch {
-                // Optimistic UI — server state will reconcile on next refresh
+                presentChallengePromptIfNeeded(error: error)
             }
         }
     }
@@ -2002,7 +2002,7 @@ extension TopicDetailViewController: PostCellDelegate {
                 }
                 await refreshPost(id: post.id)
             } catch {
-                // Optimistic UI — server state will reconcile on next refresh
+                presentChallengePromptIfNeeded(error: error)
             }
         }
     }
@@ -2070,6 +2070,9 @@ extension TopicDetailViewController: PostCellDelegate {
                         self.refreshBoostUI()
                     }
                 } catch {
+                    if self.presentChallengePromptIfNeeded(error: error) {
+                        return
+                    }
                     let failureAlert = UIAlertController(
                         title: String(localized: "reply.send.failed"),
                         message: error.localizedDescription,
@@ -2165,6 +2168,9 @@ extension TopicDetailViewController: PostCellDelegate {
                     }
                     self.refreshBoostUI()
                 } catch {
+                    if self.presentChallengePromptIfNeeded(error: error) {
+                        return
+                    }
                     let failureAlert = UIAlertController(
                         title: String(localized: "reply.send.failed"),
                         message: error.localizedDescription,

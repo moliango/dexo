@@ -4,7 +4,7 @@ import Foundation
 /// Centralizes host-specific decisions so call sites don't sprinkle string checks.
 enum ForumPolicy {
     /// Hosts where the like affordance should be suppressed in post cells.
-    private static let likeButtonSuppressedHosts: Set<String> = ["linux.do"]
+    private static let likeButtonSuppressedHosts: Set<String> = []
 
     /// Hosts that don't want client-side read-tracking POSTs to `/topics/timings`.
     private static let readTimingsSuppressedHosts: Set<String> = ["linux.do"]

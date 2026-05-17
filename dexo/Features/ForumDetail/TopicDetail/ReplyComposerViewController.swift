@@ -352,6 +352,9 @@ final class ReplyComposerViewController: BaseViewController {
                 navigationItem.rightBarButtonItem = sendButton
                 sendButton.isEnabled = true
                 textView.isEditable = true
+                if presentChallengePromptIfNeeded(error: error) {
+                    return
+                }
                 let alert = UIAlertController(
                     title: String(localized: "reply.send.failed"),
                     message: error.localizedDescription,

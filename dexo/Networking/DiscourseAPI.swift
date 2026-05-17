@@ -252,6 +252,9 @@ final class DiscourseAPI {
             method: route.method,
             headers: ["X-Requested-With": "XMLHttpRequest"]
         ).serializingData().response
+        if isCloudflareChallengeResponse(response.data) {
+            throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to delete boost"], errorType: nil)
         }
@@ -268,6 +271,9 @@ final class DiscourseAPI {
             method: route.method,
             headers: ["X-Requested-With": "XMLHttpRequest"]
         ).serializingData().response
+        if isCloudflareChallengeResponse(response.data) {
+            throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to toggle reaction"], errorType: nil)
         }
@@ -289,6 +295,9 @@ final class DiscourseAPI {
             encoding: URLEncoding.default,
             headers: ["X-Requested-With": "XMLHttpRequest"]
         ).serializingData().response
+        if isCloudflareChallengeResponse(response.data) {
+            throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to like post"], errorType: nil)
         }
@@ -302,6 +311,9 @@ final class DiscourseAPI {
             method: route.method,
             headers: ["X-Requested-With": "XMLHttpRequest"]
         ).serializingData().response
+        if isCloudflareChallengeResponse(response.data) {
+            throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             throw DiscourseAPIError(messages: ["Failed to unlike post"], errorType: nil)
         }
@@ -410,7 +422,7 @@ final class DiscourseAPI {
 
     func pollMessageBus(clientId: String, channels: [String: Int], sharedSessionKey: String? = nil) async throws -> [MessageBusMessage] {
         let route = DiscourseRouter.messageBusPoll(clientId: clientId)
-        let mbBase = baseURL.contains("linux.do") ? "https://ping.linux.do" : baseURL
+        let mbBase = baseURL.contains("linux.do") ? "https://ping.ldstatic.com" : baseURL
         let url = mbBase + route.path
         debugLog("[MessageBus] POST \(url) channels=\(channels)")
         var headers = HTTPHeaders()
@@ -508,6 +520,10 @@ final class DiscourseAPI {
             WebCookieStore.shared.mergeResponseHeaders(httpResponse.allHeaderFields, for: url)
         }
 
+        if isCloudflareChallengeResponse(response.data) {
+            throw DiscourseAPIError(messages: ["Cloudflare challenge required"], errorType: "challenge_required")
+        }
+
         if let statusCode = response.response?.statusCode, !(200 ..< 300).contains(statusCode) {
             if statusCode == 403 {
                 let data = response.data ?? Data()
@@ -563,9 +579,30 @@ struct DiscourseAPIError: LocalizedError {
         errorType == "forbidden"
     }
 
+    /// True when the response was a Cloudflare interstitial ("Just a moment...")
+    /// rather than a real API response — the caller should prompt the user to
+    /// pass the challenge before retrying.
+    var isChallengeRequired: Bool {
+        errorType == "challenge_required"
+    }
+
     var errorDescription: String? {
         messages.joined(separator: "\n")
     }
+}
+
+/// Detects Cloudflare's challenge interstitial in a response body. Cloudflare
+/// challenges may arrive with any status code (200, 403, 503), so the body is
+/// the only reliable signal.
+func isCloudflareChallengeResponse(_ data: Data?) -> Bool {
+    guard let data, !data.isEmpty else { return false }
+    // Cap the scan — Cloudflare pages are small HTML; real JSON can be huge.
+    let prefix = data.prefix(65536)
+    guard let snippet = String(data: prefix, encoding: .utf8) else { return false }
+    return snippet.contains("Just a moment...")
+        || snippet.contains("cf-browser-verification")
+        || snippet.contains("cf-challenge-running")
+        || snippet.contains("__cf_chl_")
 }
 
 // MARK: - Auth Interceptor
