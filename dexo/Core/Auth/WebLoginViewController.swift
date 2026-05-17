@@ -32,7 +32,7 @@ final class WebLoginViewController: BaseViewController {
         wv.uiDelegate = coordinator
         wv.isOpaque = false
         wv.backgroundColor = .systemBackground
-        wv.customUserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1"
+        wv.customUserAgent = Self.mobileSafariUserAgent
         wv.translatesAutoresizingMaskIntoConstraints = false
         return wv
     }()
@@ -110,6 +110,24 @@ final class WebLoginViewController: BaseViewController {
                 self.onSuccess(cookies, ua)
             }
         }
+    }
+
+    // MARK: - User Agent
+
+    /// Mobile Safari UA that tracks the device's actual iOS version + idiom
+    /// so server-side feature detection (Discourse's browser gate, dark-mode
+    /// hints, etc.) matches what real Safari would report. WebKit/Safari
+    /// build numbers stay pinned — they aren't tied to the iOS version and
+    /// real Safari rarely changes them within a major release.
+    private static var mobileSafariUserAgent: String {
+        let version = UIDevice.current.systemVersion          // e.g. "18.2.1"
+        let parts = version.split(separator: ".")
+        let major = parts.first.map(String.init) ?? "18"
+        let minor = parts.count > 1 ? String(parts[1]) : "0"
+        let osToken = "\(major)_\(minor)"                     // "18_2"
+        let versionToken = "\(major).\(minor)"                // "18.2"
+        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+        return "Mozilla/5.0 (\(device); CPU \(device) OS \(osToken) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(versionToken) Mobile/15E148 Safari/604.1"
     }
 
     // MARK: - Polyfills (iOS < 16.4)
