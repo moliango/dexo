@@ -248,6 +248,7 @@ final class TopicDetailViewController: ObservableViewController {
         let tv = ThemedTableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(PostNativeCell.self, forCellReuseIdentifier: PostNativeCell.reuseIdentifier)
+        tv.register(PostCollapsedCell.self, forCellReuseIdentifier: PostCollapsedCell.reuseIdentifier)
         tv.register(BoostCell.self, forCellReuseIdentifier: BoostCell.reuseIdentifier)
         tv.delegate = self
         tv.separatorStyle = .none
@@ -261,6 +262,22 @@ final class TopicDetailViewController: ObservableViewController {
 
         switch item {
         case .post(let postId):
+            // In tree mode, a collapsed parent renders as a compact summary row
+            // instead of the full post — dispatch to PostCollapsedCell here.
+            if self.viewModel.isTreeMode, self.viewModel.collapsedPostIds.contains(postId),
+               let post = self.viewModel.postsById[postId],
+               let cell = tableView.dequeueReusableCell(withIdentifier: PostCollapsedCell.reuseIdentifier, for: indexPath) as? PostCollapsedCell
+            {
+                let depth = self.viewModel.postDepths[postId] ?? 0
+                cell.configure(
+                    with: post,
+                    treeDepth: depth,
+                    treeLineState: self.viewModel.postTreeLineStates[postId],
+                    baseURL: self.baseURL,
+                    delegate: self
+                )
+                return cell
+            }
             let cellStart = CACurrentMediaTime()
             guard let post = self.viewModel.postsById[postId],
                   let annotatedBlocks = self.viewModel.parsedBlocks[postId],
@@ -277,9 +294,15 @@ final class TopicDetailViewController: ObservableViewController {
                 floorNumber = (self.viewModel.visiblePosts.firstIndex(where: { $0.id == postId }) ?? 0) + 1
             }
             let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
-            let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
+            let depth = self.viewModel.isTreeMode ? (self.viewModel.postDepths[postId] ?? 0) : 0
+            let indent = PostNativeCell.treeContentIndent(forDepth: depth)
+            let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24 - indent, baseURL: self.baseURL)
             let isBoostsExpanded = self.viewModel.expandedBoostPostIds.contains(postId)
-            let showsSeparator = !isBoostsExpanded
+            // Branch lines on the leading edge already carry the visual
+            // grouping between posts in tree mode, so the bottom hairline
+            // would just compete with them — drop it for tree-mode cells.
+            let showsSeparator = !isBoostsExpanded && !self.viewModel.isTreeMode
+            let treeLineState = self.viewModel.isTreeMode ? self.viewModel.postTreeLineStates[postId] : nil
             let cachedViews = self.contentViewCache[postId]
             self.precomputeHeights(forPostId: postId, blocks: annotatedBlocks, config: config, tableWidth: tableView.bounds.width)
             let isOP = post.username == self.viewModel.opUsername
@@ -298,7 +321,9 @@ final class TopicDetailViewController: ObservableViewController {
                 showsSeparator: showsSeparator,
                 precomputedBlockHeights: self.precomputedBlockHeights[postId],
                 hidesLikeButton: self.hidesLikeButton,
-                isOP: isOP
+                isOP: isOP,
+                treeDepth: depth,
+                treeLineState: treeLineState
             )
             // Cache newly rendered views for future reuse
             if cachedViews == nil {
@@ -454,6 +479,11 @@ final class TopicDetailViewController: ObservableViewController {
         FrameDropDetector.shared.start()
         navigationItem.largeTitleDisplayMode = .never
         title = String(localized: "topic_detail.default_title")
+        // Restore the user's preferred reading mode from the previous session
+        // so opening a topic doesn't reset their choice.
+        viewModel.isTreeMode = AppSettings.shared.topicTreeMode
+        navigationItem.rightBarButtonItem = treeModeBarButtonItem()
+        updateBottomBarVisibility()
 //        tableView.tableFooterView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
 
         view.addSubview(tableView)
@@ -491,7 +521,12 @@ final class TopicDetailViewController: ObservableViewController {
             let jumpFloor = initialFloor
             initialFloor = nil
             let token = enterPaginationContext(.jumping)
-            await viewModel.loadTopic(id: topicId, containerWidth: view.bounds.width)
+            if viewModel.isTreeMode {
+                await viewModel.loadNestedTopic(id: topicId)
+            } else {
+                await viewModel.loadTopic(id: topicId, containerWidth: view.bounds.width)
+            }
+            handleLoadErrorIfNeeded()
             // If the user opened the jump sheet (or replied) before the initial
             // load finished, the newer flow has bumped the token — bail and let
             // it handle its own snapshot/scroll.
@@ -703,6 +738,51 @@ final class TopicDetailViewController: ObservableViewController {
         paginationToken == token
     }
 
+    /// SF Symbol toggled between flat and tree (indented) layouts. Swapping
+    /// modes invalidates every height/content cache because tree-mode indent
+    /// shrinks the per-cell content width, so the entire stack has to be
+    /// re-measured.
+    private func treeModeBarButtonItem() -> UIBarButtonItem {
+        let name = viewModel.isTreeMode ? "list.bullet.indent" : "list.bullet"
+        let image = UIImage(systemName: name)
+        let item = UIBarButtonItem(
+            image: image,
+            style: .plain,
+            target: self,
+            action: #selector(treeModeToggleTapped)
+        )
+        item.accessibilityLabel = String(localized: "topic_detail.tree_mode")
+        return item
+    }
+
+    private func updateBottomBarVisibility() {
+        bottomBar.hidesFloorControls = viewModel.isTreeMode
+    }
+
+    @objc private func treeModeToggleTapped() {
+        viewModel.isTreeMode.toggle()
+        AppSettings.shared.topicTreeMode = viewModel.isTreeMode
+        navigationItem.rightBarButtonItem = treeModeBarButtonItem()
+        updateBottomBarVisibility()
+        invalidateRenderCaches()
+        // Each mode pulls from a different endpoint; refetch so the data
+        // matches what the renderer expects (server tree vs. flat stream).
+        let token = enterPaginationContext(.jumping)
+        Task { [weak self] in
+            guard let self else { return }
+            if self.viewModel.isTreeMode {
+                await self.viewModel.loadNestedTopic(id: self.topicId)
+            } else {
+                await self.viewModel.loadTopic(id: self.topicId, containerWidth: self.view.bounds.width)
+            }
+            self.handleLoadErrorIfNeeded()
+            guard self.paginationTokenIsCurrent(token) else { return }
+            let snapshot = self.buildSnapshot()
+            await self.dataSource.applySnapshotUsingReloadData(snapshot)
+            self.endPaginationContext(token)
+        }
+    }
+
     /// Drop every render cache. Called before a window-replacing flow
     /// (`jumpToFloor`, `enableReverseOrder`, `toggleSummaryMode`) — the new
     /// posts will produce fresh heights and content views on first display.
@@ -746,13 +826,18 @@ final class TopicDetailViewController: ObservableViewController {
             precomputedTotalHeights.removeAll(keepingCapacity: true)
             precomputedWidth = width
         }
-        let config = NativeRenderConfig.default(contentWidth: width - 24, baseURL: baseURL)
         let chrome = PostNativeCell.chromeHeight()
         let stackSpacing = NativeContentRenderer.contentStackSpacing
+        let isTreeMode = viewModel.isTreeMode
         for postId in postIds {
             guard precomputedBlockHeights[postId] == nil,
                   let blocks = viewModel.parsedBlocks[postId]
             else { continue }
+            // Indent shrinks the per-post content width, so heights must be
+            // measured at the post's actual depth — not at the flat-mode width.
+            let depth = isTreeMode ? (viewModel.postDepths[postId] ?? 0) : 0
+            let indent = PostNativeCell.treeContentIndent(forDepth: depth)
+            let config = NativeRenderConfig.default(contentWidth: width - 24 - indent, baseURL: baseURL)
             let heights = BlockHeightCalculator.perBlockHeights(annotatedBlocks: blocks, config: config)
             precomputedBlockHeights[postId] = heights
             if heights.allSatisfy({ $0 != nil }) {
@@ -1555,6 +1640,13 @@ extension TopicDetailViewController: TopicDetailBottomBarDelegate {
 
 extension TopicDetailViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, heightForRowAt indexPath: IndexPath) -> CGFloat {
+        // Collapsed parents render as a fixed-size compact row — short-circuit
+        // both the layout solver and the precompute cache.
+        if case .post(let postId) = dataSource.itemIdentifier(for: indexPath),
+           viewModel.isTreeMode, viewModel.collapsedPostIds.contains(postId)
+        {
+            return PostCollapsedCell.cellHeight
+        }
         // Skip systemLayoutSizeFitting entirely when we have a precomputed total
         // for this post — that's the whole point of BlockHeightCalculator.
         if case .post(let postId) = dataSource.itemIdentifier(for: indexPath),
@@ -1566,6 +1658,11 @@ extension TopicDetailViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
+        if case .post(let postId) = dataSource.itemIdentifier(for: indexPath),
+           viewModel.isTreeMode, viewModel.collapsedPostIds.contains(postId)
+        {
+            return PostCollapsedCell.cellHeight
+        }
         if case .post(let postId) = dataSource.itemIdentifier(for: indexPath),
            let precomputed = precomputedTotalHeights[postId]
         {
@@ -1646,11 +1743,17 @@ extension TopicDetailViewController: UITableViewDelegate {
             precomputedTotalHeights.removeAll(keepingCapacity: true)
             precomputedWidth = width
         }
-        // Snapshot the post -> blocks map for the work queue.
-        var pending: [(Int, [AnnotatedBlock])] = []
+        // Snapshot the post -> blocks map (plus per-post tree depth) for the
+        // work queue. Depth determines the indent and therefore the effective
+        // content width — measuring at a wrong width would invalidate the
+        // cached heights the moment the cell renders.
+        let isTreeMode = viewModel.isTreeMode
+        let depths = viewModel.postDepths
+        var pending: [(Int, [AnnotatedBlock], Int)] = []
         for (postId, blocks) in viewModel.parsedBlocks {
             if precomputedBlockHeights[postId] == nil {
-                pending.append((postId, blocks))
+                let depth = isTreeMode ? (depths[postId] ?? 0) : 0
+                pending.append((postId, blocks, depth))
             }
         }
         guard !pending.isEmpty else {
@@ -1669,7 +1772,7 @@ extension TopicDetailViewController: UITableViewDelegate {
         heightWarmupInFlightWidth = width
         debugLog("heightWarmup dispatching posts=\(pending.count) width=\(Int(width))")
 
-        let config = NativeRenderConfig.default(contentWidth: width - 24, baseURL: baseURL)
+        let baseURLCaptured = baseURL
         let chrome = PostNativeCell.chromeHeight()
         let stackSpacing = NativeContentRenderer.contentStackSpacing
 
@@ -1681,8 +1784,10 @@ extension TopicDetailViewController: UITableViewDelegate {
             // outliers in the trace without spamming a per-post line for
             // every post in the topic.
             var perPostMs: [(postId: Int, ms: Double, blocks: Int, nilCount: Int)] = []
-            for (postId, blocks) in pending {
+            for (postId, blocks, depth) in pending {
                 let pt0 = CACurrentMediaTime()
+                let indent = PostNativeCell.treeContentIndent(forDepth: depth)
+                let config = NativeRenderConfig.default(contentWidth: width - 24 - indent, baseURL: baseURLCaptured)
                 let (heights, profile) = BlockHeightCalculator.perBlockHeightsProfiled(
                     annotatedBlocks: blocks, config: config
                 )
@@ -1836,7 +1941,21 @@ extension TopicDetailViewController: UITableViewDelegate {
         guard indexPath.row >= totalRows - 1,
               case .idle = paginationContext
         else { return }
-        if viewModel.isReverseOrder {
+        if viewModel.isTreeMode {
+            // Tree mode paginates by root-level replies, not by flat stream
+            // index, so it uses its own loader. Only fire when the server
+            // actually has more roots queued.
+            guard viewModel.nestedHasMoreRoots else { return }
+            let token = enterPaginationContext(.loadingMore)
+            Task {
+                let added = await viewModel.loadMoreNestedRoots()
+                guard paginationTokenIsCurrent(token) else { return }
+                if !added.isEmpty {
+                    applyLoadMoreSnapshot(addedPostIds: added)
+                }
+                endPaginationContext(token)
+            }
+        } else if viewModel.isReverseOrder {
             // Treat reverse-mode "scroll to bottom" as a load-earlier, but
             // without the anchor (we're appending visually in reverse, so the
             // user's current view doesn't shift) — preserve contentOffset.
@@ -1987,7 +2106,7 @@ extension TopicDetailViewController: PostCellDelegate {
                 try await api.toggleReaction(postId: post.id, reactionId: reactionId)
                 await refreshPost(id: post.id)
             } catch {
-                presentChallengePromptIfNeeded(error: error)
+                presentChallengePromptIfNeeded(error: error, on: api)
             }
         }
     }
@@ -2002,9 +2121,19 @@ extension TopicDetailViewController: PostCellDelegate {
                 }
                 await refreshPost(id: post.id)
             } catch {
-                presentChallengePromptIfNeeded(error: error)
+                presentChallengePromptIfNeeded(error: error, on: api)
             }
         }
+    }
+
+    /// Pull the raw error out of the just-completed topic load and route it
+    /// to the Cloudflare-challenge prompt when applicable. The VM also stores
+    /// `errorMessage` for the inline error label; this path supplements that
+    /// with an actionable prompt for the linux.do challenge case.
+    private func handleLoadErrorIfNeeded() {
+        guard let error = viewModel.lastLoadError else { return }
+        viewModel.lastLoadError = nil
+        presentChallengePromptIfNeeded(error: error, on: api)
     }
 
     /// Re-fetch a single post and ask the data source to reconfigure its row.
@@ -2070,7 +2199,7 @@ extension TopicDetailViewController: PostCellDelegate {
                         self.refreshBoostUI()
                     }
                 } catch {
-                    if self.presentChallengePromptIfNeeded(error: error) {
+                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) {
                         return
                     }
                     let failureAlert = UIAlertController(
@@ -2099,28 +2228,35 @@ extension TopicDetailViewController: PostCellDelegate {
         }
     }
 
+    func postCell(didToggleCollapseForPostId postId: Int) {
+        viewModel.toggleCollapse(postId: postId)
+        invalidateRenderCaches()
+        let snapshot = buildSnapshot()
+        dataSource.applySnapshotUsingReloadData(snapshot)
+    }
+
     func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post) {
         guard let replyPostNumber = post.replyToPostNumber, replyPostNumber > 0 else { return }
-        // Map post-number → ID. `allPostIds` is the full topic stream the
-        // server returned, so floor `N` lives at index `N - 1`.
-        let index = replyPostNumber - 1
-        guard index >= 0, index < viewModel.allPostIds.count else { return }
-        let targetId = viewModel.allPostIds[index]
 
-        // Already loaded in the current window → present immediately.
-        if let parent = viewModel.postsById[targetId] {
+        // First check the currently loaded window. Match on `postNumber`
+        // directly — indexing into `allPostIds` by `postNumber - 1` is wrong
+        // whenever the stream has gaps (deleted / hidden floors), since the
+        // stream is dense by ID but `postNumber` skips removed slots.
+        if let parent = viewModel.posts.first(where: { $0.postNumber == replyPostNumber }) {
             presentReplyPreview(for: parent)
             return
         }
 
-        // Not loaded yet — fetch by ID before presenting.
+        // Not loaded — fetch the post by topic + floor.
         Task { [weak self] in
             guard let self else { return }
             do {
-                let parent = try await self.api.fetchPost(id: targetId)
+                let parent = try await self.api.fetchPostByNumber(
+                    topicId: self.topicId, postNumber: replyPostNumber
+                )
                 self.presentReplyPreview(for: parent)
             } catch {
-                debugLog("[ReplyPreview] fetchPost(\(targetId)) failed: \(error)")
+                debugLog("[ReplyPreview] fetchPostByNumber(\(replyPostNumber)) failed: \(error)")
             }
         }
     }
@@ -2165,6 +2301,7 @@ extension TopicDetailViewController: PostCellDelegate {
                     containerWidth: self.view.bounds.width,
                     nearPostNumber: newPostNumber
                 )
+                self.handleLoadErrorIfNeeded()
                 guard self.paginationTokenIsCurrent(token) else { return }
                 // Land the new reply at the bottom of the screen so the
                 // composer's last visible content stays in focus.
@@ -2210,7 +2347,7 @@ extension TopicDetailViewController: PostCellDelegate {
                     }
                     self.refreshBoostUI()
                 } catch {
-                    if self.presentChallengePromptIfNeeded(error: error) {
+                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) {
                         return
                     }
                     let failureAlert = UIAlertController(

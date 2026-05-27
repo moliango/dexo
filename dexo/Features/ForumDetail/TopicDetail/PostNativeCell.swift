@@ -2,6 +2,133 @@ import CookedHTML
 import SDWebImage
 import UIKit
 
+/// Per-post tree rendering metadata. Lives next to the cell because the cell
+/// is the only consumer; populated by the view-model during DFS so that the
+/// cell can draw the proper continuation / corner connectors without having
+/// to walk the tree again at render time.
+struct TreeLineState {
+    /// 0 for the OP, +1 per nesting level.
+    let depth: Int
+    /// True when this post is the last child among its siblings — drives whether
+    /// the column line stops at the avatar's horizontal or continues to the
+    /// bottom of the cell.
+    let isLastSibling: Bool
+    /// Length `max(0, depth - 1)`. `ancestorTrails[i] == true` means the
+    /// ancestor at depth `i + 1` still has siblings below the current row, so a
+    /// vertical line should pass through this cell at that column.
+    let ancestorTrails: [Bool]
+    /// True when this post has any direct replies in the loaded window. Drives
+    /// the visibility of the collapse / expand pill in tree mode.
+    let hasChildren: Bool
+    /// True when the user has toggled this subtree off; descendants are hidden
+    /// elsewhere by the view-model, the cell only needs this to flip the pill
+    /// icon between "−" and "+".
+    let isCollapsed: Bool
+}
+
+/// Custom view that paints the tree-mode connector. Avatars indent per depth
+/// but sit slightly to the right of the line column so the line has a gutter
+/// on the avatar's left — that's where the incoming L-elbow lives. The pill
+/// for cells with children sits on a separate "outgoing" column at one indent
+/// step further right.
+///
+/// OP (depth 0) and column 1 are never drawn — direct replies to OP don't
+/// need a line back to floor 1.
+final class TreeLineView: UIView {
+    var state: TreeLineState? {
+        didSet { setNeedsDisplay() }
+    }
+    /// Y center for the L-elbow — aligned with the avatar's vertical middle.
+    var connectorY: CGFloat = 28 {
+        didSet { setNeedsDisplay() }
+    }
+    /// Y of the avatar's bottom edge; the outgoing column for children begins
+    /// here so visually "the line comes out of the avatar's bottom".
+    var avatarBottomY: CGFloat = 44 {
+        didSet { setNeedsDisplay() }
+    }
+    var lineColor: UIColor = .tertiarySystemFill {
+        didSet { setNeedsDisplay() }
+    }
+    /// Quarter-circle radius for the elbow curve.
+    var cornerRadius: CGFloat = 6 {
+        didSet { setNeedsDisplay() }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        isUserInteractionEnabled = false
+        isOpaque = false
+        contentMode = .redraw
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func draw(_ rect: CGRect) {
+        guard let state else { return }
+        // OP and column-1 contexts produce no visible lines.
+        let drawsIncoming = state.depth >= 2
+        let drawsOutgoing = state.hasChildren && !state.isCollapsed && state.depth >= 1
+        guard drawsIncoming || drawsOutgoing else { return }
+        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+        let cappedDepth = min(state.depth, PostNativeCell.treeMaxIndentLevels)
+        ctx.setStrokeColor(lineColor.cgColor)
+        ctx.setLineWidth(1)
+        ctx.setLineCap(.square)
+
+        if drawsIncoming {
+            // Ancestor trails (skip column 1 → start at i == 1).
+            let trailLimit = min(state.ancestorTrails.count, cappedDepth - 1)
+            for i in 1 ..< trailLimit where state.ancestorTrails[i] {
+                let x = Self.columnX(forDepth: i + 1)
+                ctx.move(to: CGPoint(x: x, y: 0))
+                ctx.addLine(to: CGPoint(x: x, y: rect.height))
+            }
+
+            // Own L-elbow at the current depth column, curving into the avatar.
+            let x = Self.columnX(forDepth: cappedDepth)
+            let stubEndX = x + PostNativeCell.treeIndentStep * 0.5
+            let radius = min(cornerRadius, PostNativeCell.treeIndentStep * 0.5)
+            ctx.move(to: CGPoint(x: x, y: 0))
+            ctx.addArc(
+                tangent1End: CGPoint(x: x, y: connectorY),
+                tangent2End: CGPoint(x: x + radius, y: connectorY),
+                radius: radius
+            )
+            ctx.addLine(to: CGPoint(x: stubEndX, y: connectorY))
+            if !state.isLastSibling {
+                ctx.move(to: CGPoint(x: x, y: connectorY))
+                ctx.addLine(to: CGPoint(x: x, y: rect.height))
+            }
+        }
+
+        if drawsOutgoing {
+            // Outgoing column for this post's children, starting at the
+            // avatar's bottom so it visually "drops out of" the avatar. The
+            // pill drawn on top by the cell view sits at the midpoint of this
+            // segment.
+            let childCappedDepth = min(state.depth + 1, PostNativeCell.treeMaxIndentLevels)
+            let childX = Self.columnX(forDepth: childCappedDepth)
+            ctx.move(to: CGPoint(x: childX, y: avatarBottomY))
+            ctx.addLine(to: CGPoint(x: childX, y: rect.height))
+        }
+
+        ctx.strokePath()
+    }
+
+    /// Pixel x for the vertical line at a given tree depth's INCOMING side —
+    /// i.e. the avatar.center of the parent at depth (D - 1). Anchoring on the
+    /// parent's avatar.center means every line emerges from the parent
+    /// avatar's bottom-center, which is what users intuitively expect.
+    static func columnX(forDepth depth: Int) -> CGFloat {
+        // 12 (cell leading) + parent avatar.leading shift + 16 (half avatar).
+        let parentIndent = PostNativeCell.treeAvatarIndent(forDepth: depth - 1)
+        return 12 + parentIndent + 16
+    }
+}
+
 final class PostNativeCell: UITableViewCell {
     static let reuseIdentifier = "PostNativeCell"
     static let headerHeight: CGFloat = 44
@@ -15,6 +142,36 @@ final class PostNativeCell: UITableViewCell {
         let avatarSize = FontManager.shared.scaled(baseAvatarSize)
         return 24 + avatarSize + 17 + bottomBarHeight
     }
+
+    /// Pixels of avatar leading-indent applied per tree depth. The step is
+    /// wider than the avatar's half-width so the parent's avatar.center line
+    /// column ends up just to the left of the child's avatar, leaving room
+    /// for the L-elbow's horizontal stub.
+    static let treeIndentStep: CGFloat = 22
+    static let treeMaxIndentLevels: Int = 5
+    /// Extra horizontal offset from the avatar's leading edge to where the
+    /// content stack starts in tree mode. Keeps the post body well clear of
+    /// the outgoing column line (at avatar.center) so the body never visually
+    /// touches the spine.
+    static let treeContentExtraShift: CGFloat = 28
+
+    /// Leading offset for the avatar in tree mode. OP (depth 0) and direct
+    /// replies to OP (depth 1) share the same x — the spine doesn't reach
+    /// floor 1, so there's no reason to indent floor-1 avatars.
+    static func treeAvatarIndent(forDepth depth: Int) -> CGFloat {
+        guard depth >= 2 else { return 0 }
+        let cappedSteps = min(depth - 1, treeMaxIndentLevels - 1)
+        return CGFloat(cappedSteps) * treeIndentStep
+    }
+
+    /// Leading offset for the content stack in tree mode. Equal to the
+    /// avatar's indent plus an extra shift so the body text never overlaps the
+    /// outgoing line column. OP is exempt — it isn't part of the tree.
+    static func treeContentIndent(forDepth depth: Int) -> CGFloat {
+        guard depth >= 1 else { return 0 }
+        return treeAvatarIndent(forDepth: depth) + treeContentExtraShift
+    }
+
     private static let symbolConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
 
     // Pre-rendered fallback images so the hot configure / prepareForReuse paths
@@ -23,30 +180,9 @@ final class PostNativeCell: UITableViewCell {
     private static let heartFillImage = UIImage(systemName: "heart.fill", withConfiguration: symbolConfig)
     private static let boostFallbackImage = UIImage(named: "roket.symbols", in: nil, with: symbolConfig)
 
-    /// Pre-rendered OP badge image with rounded corners (cached once).
-    private static let opBadgeImage: UIImage = {
-        let text = "OP"
-        let font = FontManager.shared.font(size: 10, weight: .bold)
-        let textSize = (text as NSString).size(withAttributes: [.font: font])
-        let padding = UIEdgeInsets(top: 1.5, left: 4, bottom: 1.5, right: 4)
-        let size = CGSize(
-            width: ceil(textSize.width + padding.left + padding.right),
-            height: ceil(textSize.height + padding.top + padding.bottom)
-        )
-        return UIGraphicsImageRenderer(size: size).image { ctx in
-            let rect = CGRect(origin: .zero, size: size)
-            let path = UIBezierPath(roundedRect: rect, cornerRadius: 3)
-            UIColor.systemBlue.setFill()
-            path.fill()
-            let style = NSMutableParagraphStyle()
-            style.alignment = .center
-            text.draw(in: rect.inset(by: padding), withAttributes: [
-                .font: font,
-                .foregroundColor: UIColor.white,
-                .paragraphStyle: style,
-            ])
-        }
-    }()
+    /// Horizontal / vertical padding applied to the OP name pill around `nameLabel`.
+    private static let opPillHorizontalPadding: CGFloat = 5
+    private static let opPillVerticalPadding: CGFloat = 2
 
     weak var delegate: PostCellDelegate?
     private(set) var postId: Int = 0
@@ -103,6 +239,71 @@ final class PostNativeCell: UITableViewCell {
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
+
+    /// Pill drawn behind `nameLabel` to mark the OP. Background tinted with the
+    /// active theme accent; hidden for non-OP posts and collapses to zero
+    /// padding so the layout matches the original.
+    private let nameBackgroundView: UIView = {
+        let v = UIView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.layer.cornerRadius = 4
+        v.layer.cornerCurve = .continuous
+        v.isHidden = true
+        return v
+    }()
+
+    private var nameBgLeading: NSLayoutConstraint!
+    private var nameBgTrailing: NSLayoutConstraint!
+    private var nameBgTop: NSLayoutConstraint!
+    private var nameBgBottom: NSLayoutConstraint!
+    private var usernameLabelTop: NSLayoutConstraint!
+
+    /// Leading anchors that shift right when rendering as a tree-mode reply.
+    /// Their base `constant` (12pt for avatar / content / 16pt for the bottom
+    /// bar) is preserved; configure adds the per-depth indent on top.
+    private var avatarLeading: NSLayoutConstraint!
+    private var contentStackLeading: NSLayoutConstraint!
+    private var bottomLeftStackLeading: NSLayoutConstraint!
+
+    /// Two pairs of constraints that govern where the time + reply badge land
+    /// when the floor label is hidden in tree mode. In flat mode the floor
+    /// sits at the top row with the reply badge alongside, and the time is
+    /// the row below. In tree mode the floor is gone, so the reply badge
+    /// takes its row at the top and time drops below — preserving the
+    /// vertical stacking instead of squishing them onto the same row.
+    private var timeLabelTopFlat: NSLayoutConstraint!
+    private var timeLabelTopTree: NSLayoutConstraint!
+    private var replyToCenterYFlat: NSLayoutConstraint!
+    private var replyToTopTree: NSLayoutConstraint!
+
+    /// Branch / corner connector overlay shown only in tree mode. Hidden + has
+    /// no state when the cell is rendering a flat-mode post so the existing
+    /// layout stays pixel-identical to before this feature.
+    private let treeLineView: TreeLineView = {
+        let v = TreeLineView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.isHidden = true
+        return v
+    }()
+
+    /// Circle pill that sits on the children's column line and toggles the
+    /// subtree visibility. Only shown in tree mode for posts that actually
+    /// have replies in the loaded window.
+    private let collapseButton: UIButton = {
+        let b = UIButton(type: .system)
+        b.translatesAutoresizingMaskIntoConstraints = false
+        b.backgroundColor = .systemBackground
+        b.layer.cornerRadius = 9
+        b.layer.borderWidth = 1
+        b.tintColor = .secondaryLabel
+        b.isHidden = true
+        let cfg = UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
+        b.setPreferredSymbolConfiguration(cfg, forImageIn: .normal)
+        b.accessibilityLabel = String(localized: "topic_detail.collapse")
+        return b
+    }()
+
+    private var collapseLeading: NSLayoutConstraint!
 
     private let usernameLabel: UILabel = {
         let label = UILabel()
@@ -288,8 +489,11 @@ final class PostNativeCell: UITableViewCell {
     }
 
     private func setupViews() {
+        contentView.addSubview(treeLineView)
+        contentView.addSubview(collapseButton)
         contentView.addSubview(avatarImageView)
         contentView.addSubview(flairImageView)
+        contentView.addSubview(nameBackgroundView)
         contentView.addSubview(nameLabel)
         contentView.addSubview(usernameLabel)
         contentView.addSubview(userTitleLabel)
@@ -323,9 +527,55 @@ final class PostNativeCell: UITableViewCell {
         flairWidthConstraint = flairImageView.widthAnchor.constraint(equalToConstant: Self.baseFlairSize)
         flairHeightConstraint = flairImageView.heightAnchor.constraint(equalToConstant: Self.baseFlairSize)
 
+        // Pill's outer edges hug the avatar gap; nameLabel sits inside via these
+        // constraints whose `constant` is toggled in `configure` between 0 and
+        // the OP padding amount. Keeping the pill (not the text) anchored to
+        // `avatar+8` means the visual gutter from avatar to the cell content
+        // doesn't shift when the OP marker turns on/off.
+        nameBgLeading = nameLabel.leadingAnchor.constraint(equalTo: nameBackgroundView.leadingAnchor)
+        nameBgTrailing = nameBackgroundView.trailingAnchor.constraint(equalTo: nameLabel.trailingAnchor)
+        nameBgTop = nameLabel.topAnchor.constraint(equalTo: nameBackgroundView.topAnchor)
+        nameBgBottom = nameBackgroundView.bottomAnchor.constraint(equalTo: nameLabel.bottomAnchor)
+
         NSLayoutConstraint.activate([
+            nameBgLeading, nameBgTrailing, nameBgTop, nameBgBottom,
+        ])
+
+        avatarLeading = avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
+        contentStackLeading = contentStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
+        bottomLeftStackLeading = bottomLeftStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16)
+
+        // Pair A (flat): time + reply badge sit relative to the floor label.
+        // Pair B (tree): floor is hidden, so the reply badge takes the top
+        // row and the time stacks below it — keep them vertically separated.
+        timeLabelTopFlat = timeLabel.topAnchor.constraint(equalTo: floorLabel.bottomAnchor, constant: 2)
+        timeLabelTopTree = timeLabel.topAnchor.constraint(equalTo: replyToLabel.bottomAnchor, constant: 2)
+        replyToCenterYFlat = replyToLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor)
+        replyToTopTree = replyToLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14)
+        // Default to flat — `configure` swaps to the tree pair when in tree mode.
+        NSLayoutConstraint.activate([timeLabelTopFlat, replyToCenterYFlat])
+
+        // Collapse pill centerX is updated per-cell in `configure`; we anchor
+        // the leading edge so a single stored constraint moves it horizontally
+        // without rebuilding constraints each reuse.
+        collapseLeading = collapseButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 0)
+
+        NSLayoutConstraint.activate([
+            treeLineView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            treeLineView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            treeLineView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            treeLineView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+
+            collapseButton.widthAnchor.constraint(equalToConstant: 18),
+            collapseButton.heightAnchor.constraint(equalToConstant: 18),
+            collapseLeading,
+            // Pill sits just inside the cell's bottom edge so it falls
+            // immediately above the next (child) cell's avatar, on the line
+            // about to enter that avatar.
+            collapseButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
+
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            avatarLeading,
             avatarWidthConstraint,
             avatarHeightConstraint,
 
@@ -335,30 +585,28 @@ final class PostNativeCell: UITableViewCell {
             flairHeightConstraint,
 
             nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            nameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
+            nameBackgroundView.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
 
-            usernameLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
+            { usernameLabelTop = usernameLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor); return usernameLabelTop }(),
             usernameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
 
             userTitleLabel.lastBaselineAnchor.constraint(equalTo: nameLabel.lastBaselineAnchor),
-            userTitleLabel.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 4),
+            userTitleLabel.leadingAnchor.constraint(equalTo: nameBackgroundView.trailingAnchor, constant: 4),
             userTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: replyToLabel.leadingAnchor, constant: -8),
 
-            replyToLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
             replyToLabel.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -8),
 
             floorLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
             floorLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
 
-            timeLabel.topAnchor.constraint(equalTo: floorLabel.bottomAnchor, constant: 2),
             timeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
 
             contentStackView.topAnchor.constraint(equalTo: avatarImageView.bottomAnchor, constant: 12),
-            contentStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            contentStackLeading,
             contentStackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
 
             bottomLeftStack.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            bottomLeftStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            bottomLeftStackLeading,
             bottomLeftStack.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
 
             moreButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
@@ -396,6 +644,7 @@ final class PostNativeCell: UITableViewCell {
         ])
 
         showRepliesButton.addTarget(self, action: #selector(repliesButtonTapped), for: .touchUpInside)
+        collapseButton.addTarget(self, action: #selector(collapseButtonTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
         reactButton.addTarget(self, action: #selector(reactButtonTapped), for: .touchUpInside)
         let reactLongPress = UILongPressGestureRecognizer(target: self, action: #selector(reactButtonLongPressed(_:)))
@@ -444,6 +693,8 @@ final class PostNativeCell: UITableViewCell {
         precomputedBlockHeights: [CGFloat?]? = nil,
         hidesLikeButton: Bool = false,
         isOP: Bool = false,
+        treeDepth: Int = 0,
+        treeLineState: TreeLineState? = nil,
     ) {
         let fm = FontManager.shared
         let avatarSize = fm.scaled(Self.baseAvatarSize)
@@ -455,6 +706,52 @@ final class PostNativeCell: UITableViewCell {
         flairHeightConstraint.constant = flairSize
         flairImageView.layer.cornerRadius = flairSize / 2
 
+        // OP and depth-1 share the avatar x (depth-1 doesn't shift), while
+        // depth-2+ steps right by `treeIndentStep` per level. Content is
+        // pushed past the avatar so its body never overlaps the outgoing
+        // column line drawn at the avatar's center.
+        let avatarIndent = Self.treeAvatarIndent(forDepth: treeDepth)
+        let contentIndent = Self.treeContentIndent(forDepth: treeDepth)
+        avatarLeading.constant = 12 + avatarIndent
+        contentStackLeading.constant = 12 + contentIndent
+        let defaultBottomLeading: CGFloat = 16 + avatarIndent
+        bottomLeftStackLeading.constant = defaultBottomLeading
+
+        if let treeLineState {
+            let drawsIncoming = treeLineState.depth >= 2
+            let drawsOutgoing = treeLineState.hasChildren && !treeLineState.isCollapsed && treeLineState.depth >= 1
+            treeLineView.isHidden = !(drawsIncoming || drawsOutgoing)
+            treeLineView.state = treeLineState
+            treeLineView.connectorY = 12 + avatarSize / 2
+            treeLineView.avatarBottomY = 12 + avatarSize
+            treeLineView.lineColor = .separator
+            treeLineView.tintColor = .separator
+
+            if treeLineState.hasChildren, treeLineState.depth >= 1 {
+                collapseButton.isHidden = false
+                let cappedChildDepth = min(treeLineState.depth + 1, Self.treeMaxIndentLevels)
+                let childColumnX = TreeLineView.columnX(forDepth: cappedChildDepth)
+                // Pill is 18pt wide; center it on the children's column.
+                collapseLeading.constant = childColumnX - 9
+                // Push the bottom action stack right so reactions / badges
+                // don't collide with the pill's children column.
+                bottomLeftStackLeading.constant = max(defaultBottomLeading, childColumnX + 9 + 6)
+                let glyph = treeLineState.isCollapsed ? "plus" : "minus"
+                collapseButton.setImage(UIImage(systemName: glyph), for: .normal)
+                collapseButton.layer.borderColor = UIColor.separator.cgColor
+                collapseButton.accessibilityLabel = treeLineState.isCollapsed
+                    ? String(localized: "topic_detail.expand")
+                    : String(localized: "topic_detail.collapse")
+                collapseButton.backgroundColor = ThemeManager.shared.backgroundColor
+            } else {
+                collapseButton.isHidden = true
+            }
+        } else {
+            treeLineView.isHidden = true
+            treeLineView.state = nil
+            collapseButton.isHidden = true
+        }
+
         postId = post.id
         self.postLink = postLink
         currentPost = post
@@ -462,30 +759,47 @@ final class PostNativeCell: UITableViewCell {
         self.validReactions = validReactions
         separatorLine.isHidden = !showsSeparator
 
+        nameLabel.attributedText = nil
         if isOP {
-            let attr = NSMutableAttributedString(
-                string: post.name ?? post.username,
-                attributes: [.font: FontManager.shared.font(size: 14, weight: .semibold)]
-            )
-            attr.append(NSAttributedString(string: "  "))
-            let attachment = NSTextAttachment()
-            attachment.image = Self.opBadgeImage
-            let nameFont = FontManager.shared.font(size: 14, weight: .semibold)
-            attachment.bounds = CGRect(
-                x: 0,
-                y: (nameFont.capHeight - Self.opBadgeImage.size.height) / 2,
-                width: Self.opBadgeImage.size.width,
-                height: Self.opBadgeImage.size.height
-            )
-            attr.append(NSAttributedString(attachment: attachment))
-            nameLabel.attributedText = attr
+            let accent = ThemeManager.shared.accentColor
+            nameLabel.text = post.name ?? post.username
+            nameLabel.textColor = .white
+            nameBackgroundView.isHidden = false
+            nameBackgroundView.backgroundColor = accent
+            nameBgLeading.constant = Self.opPillHorizontalPadding
+            nameBgTrailing.constant = Self.opPillHorizontalPadding
+            nameBgTop.constant = Self.opPillVerticalPadding
+            nameBgBottom.constant = Self.opPillVerticalPadding
+            usernameLabelTop.constant = Self.opPillVerticalPadding
         } else {
-            nameLabel.attributedText = nil
             nameLabel.text = post.name
+            nameLabel.textColor = .label
+            nameBackgroundView.isHidden = true
+            nameBackgroundView.backgroundColor = nil
+            nameBgLeading.constant = 0
+            nameBgTrailing.constant = 0
+            nameBgTop.constant = 0
+            nameBgBottom.constant = 0
+            usernameLabelTop.constant = 0
         }
         usernameLabel.text = post.username
         timeLabel.text = Self.formatDate(post.createdAt)
-        floorLabel.text = "#\(floorNumber)"
+        // Tree mode reorders posts away from the canonical floor order, so the
+        // floor number ("#42") would be confusing — hide it. Flat mode keeps
+        // it visible as before.
+        let inTreeModeForFloor = treeLineState != nil
+        floorLabel.isHidden = inTreeModeForFloor
+        floorLabel.text = inTreeModeForFloor ? nil : "#\(floorNumber)"
+        // With the floor gone, the reply badge takes its row at the top and
+        // the time drops below — same vertical stack flat mode had, just one
+        // row shorter.
+        if inTreeModeForFloor {
+            NSLayoutConstraint.deactivate([timeLabelTopFlat, replyToCenterYFlat])
+            NSLayoutConstraint.activate([timeLabelTopTree, replyToTopTree])
+        } else {
+            NSLayoutConstraint.deactivate([timeLabelTopTree, replyToTopTree])
+            NSLayoutConstraint.activate([timeLabelTopFlat, replyToCenterYFlat])
+        }
 
         // User title
         if let userTitle = post.userTitle, !userTitle.isEmpty {
@@ -527,8 +841,12 @@ final class PostNativeCell: UITableViewCell {
         }
 
         let hasReplies = post.replyCount > 0
-        showRepliesButton.isHidden = !hasReplies
-        if hasReplies {
+        // In tree mode the collapse pill sits in this same column at the
+        // action-row level — hide the modal "N replies" button to avoid the
+        // two affordances stacking on top of each other.
+        let inTreeMode = treeLineState != nil
+        showRepliesButton.isHidden = !hasReplies || inTreeMode
+        if hasReplies, !inTreeMode {
             showRepliesButton.setTitle(String(localized: "post.replies \(post.replyCount)"), for: .normal)
         }
 
@@ -814,6 +1132,10 @@ final class PostNativeCell: UITableViewCell {
 
     @objc private func repliesButtonTapped() {
         delegate?.postCell(didTapShowRepliesForPostId: postId)
+    }
+
+    @objc private func collapseButtonTapped() {
+        delegate?.postCell(didToggleCollapseForPostId: postId)
     }
 
     @objc private func replyButtonTapped() {

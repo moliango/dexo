@@ -351,6 +351,10 @@ extension RepliesViewController: PostCellDelegate {
         // the parent reference here would duplicate that context. No-op.
     }
 
+    func postCell(didToggleCollapseForPostId postId: Int) {
+        // No tree-mode UI in the replies list; nothing to collapse.
+    }
+
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool) {
         Task {
             do {
@@ -382,7 +386,7 @@ extension RepliesViewController: PostCellDelegate {
                 await refreshPost(id: post.id)
             } catch {
                 debugLog("didTapReaction 发生错误: \(error)")
-                presentChallengePromptIfNeeded(error: error)
+                presentChallengePromptIfNeeded(error: error, on: api)
             }
         }
     }
@@ -397,7 +401,7 @@ extension RepliesViewController: PostCellDelegate {
                 }
                 await refreshPost(id: post.id)
             } catch {
-                presentChallengePromptIfNeeded(error: error)
+                presentChallengePromptIfNeeded(error: error, on: api)
             }
         }
     }
@@ -463,7 +467,7 @@ extension RepliesViewController: PostCellDelegate {
                     }
                     self.refreshBoostUI()
                 } catch {
-                    if self.presentChallengePromptIfNeeded(error: error) {
+                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) {
                         return
                     }
                     let failureAlert = UIAlertController(
@@ -541,7 +545,7 @@ extension RepliesViewController: PostCellDelegate {
                     self.expandedBoostPostIds.insert(post.id)
                     self.refreshBoostUI()
                 } catch {
-                    if self.presentChallengePromptIfNeeded(error: error) {
+                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) {
                         return
                     }
                     let failureAlert = UIAlertController(

@@ -25,8 +25,19 @@ final class TopicDetailBottomBar: UIView {
     private static let buttonSize: CGFloat = 44
 
     private(set) lazy var opOnlyButton = makeCircularButton(icon: "person", a11yLabel: String(localized: "topic.bottombar.op_only"))
-    private lazy var jumpToFloorButton = makeCircularButton(icon: "number", a11yLabel: String(localized: "topic.bottombar.jump_to_floor"))
+    private(set) lazy var jumpToFloorButton = makeCircularButton(icon: "number", a11yLabel: String(localized: "topic.bottombar.jump_to_floor"))
     private lazy var replyButton = makeCircularButton(icon: "arrowshape.turn.up.left", a11yLabel: String(localized: "reply.title"))
+
+    /// Hide the OP-filter and jump-to-floor pills when the topic is being
+    /// shown as a reply tree — neither floor numbers nor the OP filter make
+    /// sense once posts are reordered into a DFS view.
+    var hidesFloorControls: Bool = false {
+        didSet {
+            guard oldValue != hidesFloorControls else { return }
+            opOnlyButton.isHidden = hidesFloorControls
+            jumpToFloorButton.isHidden = hidesFloorControls
+        }
+    }
 
     private lazy var stackView: UIStackView = {
         let sv = UIStackView(arrangedSubviews: [opOnlyButton, jumpToFloorButton, replyButton])

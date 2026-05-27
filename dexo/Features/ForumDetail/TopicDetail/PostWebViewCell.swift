@@ -8,6 +8,9 @@ protocol PostCellDelegate: AnyObject {
     func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post)
     /// Tap the "↩︎ @username" badge on a reply cell to preview the post being replied to.
     func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post)
+    /// Tap the "−" / "+" pill on the tree-mode column line to collapse or
+    /// re-expand this post's subtree.
+    func postCell(didToggleCollapseForPostId postId: Int)
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool)
     func postCell(didTapAvatarForUsername username: String)
     func postCell(didTapReaction reactionId: String, forPost post: DiscourseTopicDetail.Post)

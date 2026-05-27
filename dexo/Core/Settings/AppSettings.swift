@@ -164,6 +164,14 @@ final class AppSettings {
         }
     }
 
+    /// Whether the topic detail page should default to the indented tree
+    /// rendering. Persisted between launches so the user doesn't have to flip
+    /// the nav-bar toggle every time they open a topic.
+    var topicTreeMode: Bool {
+        get { defaults.bool(forKey: "topicTreeMode") }
+        set { defaults.set(newValue, forKey: "topicTreeMode") }
+    }
+
     var boostDisplayMode: BoostDisplayMode {
         get { BoostDisplayMode(rawValue: defaults.integer(forKey: "boostDisplayMode")) ?? .danmaku }
         set { defaults.set(newValue.rawValue, forKey: "boostDisplayMode") }

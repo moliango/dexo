@@ -352,7 +352,7 @@ final class ReplyComposerViewController: BaseViewController {
                 navigationItem.rightBarButtonItem = sendButton
                 sendButton.isEnabled = true
                 textView.isEditable = true
-                if presentChallengePromptIfNeeded(error: error) {
+                if presentChallengePromptIfNeeded(error: error, on: api) {
                     return
                 }
                 let alert = UIAlertController(

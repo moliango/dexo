@@ -15,8 +15,18 @@ final class TopicDetailViewModel {
     var isFilteringByOP = false
     var isReverseOrder = false
     var isSummaryMode = false
+    var isTreeMode = false
+    /// Posts whose subtree the user has collapsed in tree mode. The collapsed
+    /// post itself stays visible; its descendants are skipped during DFS.
+    /// Cleared when leaving tree mode would just confuse users on next entry,
+    /// so it survives mode toggles.
+    var collapsedPostIds: Set<Int> = []
     var expandedBoostPostIds: Set<Int> = []
     var errorMessage: String?
+    /// Raw error from the last topic load — surfaced so the VC can route
+    /// Cloudflare-challenge cases into the auth prompt instead of just
+    /// rendering the message string. Cleared on each new `loadTopic` call.
+    var lastLoadError: Error?
 
     private let api: DiscourseAPI
     private(set) var allPostIds: [Int] = []
@@ -65,6 +75,14 @@ final class TopicDetailViewModel {
         if isFilteringByOP, let op = opUsername {
             base = base.filter { $0.username == op }
         }
+        if isTreeMode {
+            // Prefer the server-supplied tree when it's available — it's
+            // guaranteed complete (no "child paginated out of window" gaps).
+            if let opPost = nestedTreeOpPost, let roots = nestedTreeRoots {
+                return flattenNestedTree(opPost: opPost, roots: roots)
+            }
+            return treeOrderedPosts(from: base)
+        }
         if isReverseOrder {
             // Pin OP at top, then the rest of loaded posts in reverse —
             // newest immediately below OP, oldest non-OP at the bottom.
@@ -73,6 +91,344 @@ final class TopicDetailViewModel {
             return op.map { [$0] + rest } ?? rest
         }
         return base
+    }
+
+    /// Tree depth (0-based) for each loaded post, populated as a side effect
+    /// of building the tree-ordered visible list. Read by the cell at render
+    /// time to apply leading indent. Empty when `isTreeMode == false`.
+    private(set) var postDepths: [Int: Int] = [:]
+
+    /// Tree-line render state per post, populated alongside `postDepths`. The
+    /// cell consults this to draw vertical / corner connectors at the right
+    /// ancestor columns. Absent for non-tree-mode reads.
+    private(set) var postTreeLineStates: [Int: TreeLineState] = [:]
+
+    /// Server-supplied OP + top-level replies (each with full subtree on
+    /// `children`). When set, the view-model walks this directly instead of
+    /// inferring parent/child links from `replyToPostNumber` — the nested
+    /// endpoint already guarantees completeness even when the flat stream
+    /// would have paginated out the descendant in question.
+    private var nestedTreeOpPost: DiscourseTopicDetail.Post?
+    private var nestedTreeRoots: [DiscourseTopicDetail.Post]?
+    /// Pagination state for `/n/.../json` — true when more root-level replies
+    /// are available on subsequent pages. We don't load further pages yet but
+    /// the flag is here so a later "load more roots" can wire in cleanly.
+    private(set) var nestedHasMoreRoots: Bool = false
+    private(set) var nestedRootsPage: Int = 0
+
+    /// DFS-flatten the loaded posts into tree order using `replyToPostNumber`
+    /// as the parent edge. OP (postNumber == 1) is the root; replies with
+    /// `replyToPostNumber == nil` are treated as direct replies to OP. Posts
+    /// whose reply target isn't in the loaded window are demoted to root-level
+    /// (under OP) so they remain reachable.
+    ///
+    /// Siblings keep chronological order via `postNumber` ascending. Depth is
+    /// recorded into `postDepths` for the cell-render path.
+    private func treeOrderedPosts(from base: [DiscourseTopicDetail.Post]) -> [DiscourseTopicDetail.Post] {
+        postDepths = [:]
+        postTreeLineStates = [:]
+        guard !base.isEmpty else { return [] }
+        let byPostNumber = Dictionary(uniqueKeysWithValues: base.map { ($0.postNumber, $0) })
+
+        var children: [Int: [DiscourseTopicDetail.Post]] = [:]
+        var directRepliesToOP: [DiscourseTopicDetail.Post] = []
+        for post in base where post.postNumber != 1 {
+            if let replyTo = post.replyToPostNumber,
+               replyTo != post.postNumber,
+               byPostNumber[replyTo] != nil
+            {
+                children[replyTo, default: []].append(post)
+            } else {
+                directRepliesToOP.append(post)
+            }
+        }
+        for key in children.keys {
+            children[key]?.sort { $0.postNumber < $1.postNumber }
+        }
+        directRepliesToOP.sort { $0.postNumber < $1.postNumber }
+
+        var out: [DiscourseTopicDetail.Post] = []
+        out.reserveCapacity(base.count)
+
+        if let op = byPostNumber[1] {
+            postDepths[op.id] = 0
+            postTreeLineStates[op.id] = TreeLineState(
+                depth: 0,
+                isLastSibling: true,
+                ancestorTrails: [],
+                hasChildren: !directRepliesToOP.isEmpty,
+                isCollapsed: false
+            )
+            out.append(op)
+            dfsAppend(directRepliesToOP, depth: 1, children: children, ancestorTrails: [], into: &out)
+        } else {
+            dfsAppend(directRepliesToOP, depth: 0, children: children, ancestorTrails: [], into: &out)
+        }
+        return out
+    }
+
+    private func dfsAppend(
+        _ nodes: [DiscourseTopicDetail.Post],
+        depth: Int,
+        children: [Int: [DiscourseTopicDetail.Post]],
+        ancestorTrails: [Bool],
+        into out: inout [DiscourseTopicDetail.Post]
+    ) {
+        let lastIndex = nodes.count - 1
+        for (idx, post) in nodes.enumerated() {
+            let isLast = idx == lastIndex
+            let kids = children[post.postNumber] ?? []
+            let hasKids = !kids.isEmpty
+            let collapsed = collapsedPostIds.contains(post.id)
+            postDepths[post.id] = depth
+            postTreeLineStates[post.id] = TreeLineState(
+                depth: depth,
+                isLastSibling: isLast,
+                ancestorTrails: ancestorTrails,
+                hasChildren: hasKids,
+                isCollapsed: collapsed
+            )
+            out.append(post)
+            // Skip descending when the user has collapsed this subtree —
+            // descendants stay in `postsById` but drop out of the visible list.
+            if hasKids, !collapsed {
+                var nextTrails = ancestorTrails
+                nextTrails.append(!isLast)
+                dfsAppend(kids, depth: depth + 1, children: children, ancestorTrails: nextTrails, into: &out)
+            }
+        }
+    }
+
+    func toggleCollapse(postId: Int) {
+        if collapsedPostIds.contains(postId) {
+            collapsedPostIds.remove(postId)
+        } else {
+            collapsedPostIds.insert(postId)
+        }
+    }
+
+    /// DFS-flatten the server-supplied nested tree, simultaneously computing
+    /// per-post tree state. Mirrors `dfsAppend` but reads child links from the
+    /// post's own `children` array (server-authoritative) instead of inferring
+    /// them from `replyToPostNumber`.
+    private func flattenNestedTree(
+        opPost: DiscourseTopicDetail.Post,
+        roots: [DiscourseTopicDetail.Post]
+    ) -> [DiscourseTopicDetail.Post] {
+        postDepths = [:]
+        postTreeLineStates = [:]
+
+        var out: [DiscourseTopicDetail.Post] = []
+        out.reserveCapacity(roots.count + 1)
+
+        let hasRoots = !roots.isEmpty
+        postDepths[opPost.id] = 0
+        postTreeLineStates[opPost.id] = TreeLineState(
+            depth: 0,
+            isLastSibling: true,
+            ancestorTrails: [],
+            hasChildren: hasRoots,
+            isCollapsed: false
+        )
+        out.append(opPost)
+
+        dfsNested(roots, depth: 1, ancestorTrails: [], into: &out)
+        return out
+    }
+
+    private func dfsNested(
+        _ nodes: [DiscourseTopicDetail.Post],
+        depth: Int,
+        ancestorTrails: [Bool],
+        into out: inout [DiscourseTopicDetail.Post]
+    ) {
+        let lastIndex = nodes.count - 1
+        for (idx, post) in nodes.enumerated() {
+            let isLast = idx == lastIndex
+            let kids = post.children ?? []
+            let hasKids = !kids.isEmpty
+            let collapsed = collapsedPostIds.contains(post.id)
+            postDepths[post.id] = depth
+            postTreeLineStates[post.id] = TreeLineState(
+                depth: depth,
+                isLastSibling: isLast,
+                ancestorTrails: ancestorTrails,
+                hasChildren: hasKids,
+                isCollapsed: collapsed
+            )
+            out.append(post)
+            if hasKids, !collapsed {
+                var nextTrails = ancestorTrails
+                nextTrails.append(!isLast)
+                dfsNested(kids, depth: depth + 1, ancestorTrails: nextTrails, into: &out)
+            }
+        }
+    }
+
+    /// Recursively collect every post in the nested tree into `postsById` and
+    /// `parsedBlocks` so the rest of the view-model (which keys off post IDs)
+    /// can find them. Each stored copy has its `children` link cleared to
+    /// avoid carrying around two views of the same data — the tree shape lives
+    /// in `nestedTreeRoots`, the per-post data lives in `postsById`.
+    private func ingestNested(_ post: DiscourseTopicDetail.Post) {
+        var bare = post
+        bare.children = nil
+        parseAndStore(post: bare)
+        for child in post.children ?? [] {
+            ingestNested(child)
+        }
+    }
+
+    /// Fetch the next page of root-level replies in tree mode and append them
+    /// to the existing tree. Returns the IDs of any new posts ingested so the
+    /// view-controller can drive a partial snapshot update.
+    @discardableResult
+    func loadMoreNestedRoots() async -> [Int] {
+        guard isTreeMode, nestedHasMoreRoots, !isLoadingMore,
+              let topicId = topic?.id ?? lastLoadedTopicId
+        else { return [] }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+
+        let nextPage = nestedRootsPage + 1
+        let capturedGeneration = loadGeneration
+
+        do {
+            let response = try await api.fetchNestedTopic(id: topicId, slug: nil, sort: "top", page: nextPage)
+            // Bail if the window was reset under us (jumpToFloor, mode flip).
+            guard loadGeneration == capturedGeneration else { return [] }
+
+            var added: [Int] = []
+            // Drop roots that we somehow already have (shouldn't happen, but
+            // defends against duplicates if the server pages overlap).
+            let existingIds = Set((nestedTreeRoots ?? []).map(\.id))
+            let newRoots = response.roots.filter { !existingIds.contains($0.id) }
+            for root in newRoots {
+                ingestNested(root)
+                collectIds(in: root, into: &added)
+            }
+            nestedTreeRoots = (nestedTreeRoots ?? []) + newRoots
+            nestedHasMoreRoots = response.hasMoreRoots
+            nestedRootsPage = response.page
+
+            // Refresh the synthesized topic so callers reading topic.postStream
+            // (e.g. height precompute via parsedBlocks scan) see the new posts.
+            if var existing = topic {
+                existing.postStream = DiscourseTopicDetail.PostStream(
+                    posts: Array(postsById.values),
+                    stream: nil
+                )
+                topic = existing
+            }
+            allPostIds = Array(postsById.keys)
+            loadedPostIds = Set(postsById.keys)
+            loadedRangeEnd = allPostIds.count
+
+            // Re-fire isReady so the VC's withPerceptionTracking re-runs and
+            // picks up the new posts even if nothing else observably changed.
+            if isReady { isReady = false }
+            isReady = true
+            return added
+        } catch {
+            debugLog("[TopicDetail] Load more nested roots failed: \(error)")
+            return []
+        }
+    }
+
+    /// Recursively collect every post ID in a subtree — used to drive partial
+    /// snapshot diff for the "load more roots" path.
+    private func collectIds(in post: DiscourseTopicDetail.Post, into out: inout [Int]) {
+        out.append(post.id)
+        for child in post.children ?? [] {
+            collectIds(in: child, into: &out)
+        }
+    }
+
+    /// Load the topic via Discourse's nested-replies endpoint. Replaces the
+    /// flat post stream with the server-supplied tree, so opening a tree-mode
+    /// topic doesn't suffer the "child paginated out of window" problem the
+    /// flat path has.
+    func loadNestedTopic(id: Int, sort: String? = "top") async {
+        isLoading = true
+        isReady = false
+        errorMessage = nil
+        lastLoadError = nil
+        parsedBlocks = [:]
+        postsById = [:]
+        let isNewTopic = lastLoadedTopicId != id
+        lastLoadedTopicId = id
+        loadGeneration &+= 1
+        if isNewTopic {
+            firstPost = nil
+        }
+        // Wipe any state from a previous flat load — we're switching modes.
+        nestedTreeOpPost = nil
+        nestedTreeRoots = nil
+        nestedHasMoreRoots = false
+        nestedRootsPage = 0
+
+        // The router accepts a nil slug and substitutes `-`, which Discourse
+        // routes the same way as the real slug. No slug lookup needed.
+        do {
+            let response = try await api.fetchNestedTopic(id: id, slug: nil, sort: sort)
+            // First-page response carries the topic metadata and OP; bail if
+            // somehow we got a paginated payload here (shouldn't, but be safe).
+            guard let opPost = response.opPost, let topicMeta = response.topic else {
+                throw DiscourseAPIError(messages: ["Nested topic response missing OP"], errorType: "decode_error")
+            }
+            nestedTreeOpPost = opPost
+            nestedTreeRoots = response.roots
+            nestedHasMoreRoots = response.hasMoreRoots
+            nestedRootsPage = response.page
+
+            // Cache OP for opUsername resolution.
+            firstPost = opPost
+
+            // Walk the tree and stuff every node into `postsById` + parsed
+            // blocks so cell render paths key by ID just like flat mode.
+            ingestNested(opPost)
+            for root in response.roots {
+                ingestNested(root)
+            }
+
+            // Synthesize a topic object so consumers that read tags / titles
+            // off `viewModel.topic` keep working. `validReactions` isn't on
+            // this endpoint — leave it empty in tree mode for now; reactions
+            // still work, the list just lacks the picker hint.
+            let synthetic = DiscourseTopicDetail(
+                id: topicMeta.id,
+                title: topicMeta.title,
+                fancyTitle: topicMeta.fancyTitle,
+                postsCount: topicMeta.postsCount,
+                replyCount: topicMeta.replyCount,
+                categoryId: topicMeta.categoryId,
+                createdAt: topicMeta.createdAt ?? "",
+                tags: topicMeta.tags,
+                postStream: DiscourseTopicDetail.PostStream(
+                    posts: Array(postsById.values),
+                    stream: nil
+                ),
+                validReactions: topic?.validReactions ?? [],
+                lastReadPostNumber: nil
+            )
+            topic = synthetic
+
+            // Treat the nested response as "the whole window" — no flat-mode
+            // pagination state applies.
+            allPostIds = Array(postsById.keys)
+            loadedPostIds = Set(postsById.keys)
+            loadedRangeStart = 0
+            loadedRangeEnd = allPostIds.count
+
+            if isReady { isReady = false }
+            isReady = true
+        } catch {
+            debugLog("[TopicDetail] Nested load failed: \(error)")
+            errorMessage = error.localizedDescription
+            lastLoadError = error
+        }
+
+        isLoading = false
     }
 
     var canLoadMore: Bool {
@@ -123,6 +479,7 @@ final class TopicDetailViewModel {
         isLoading = true
         isReady = false
         errorMessage = nil
+        lastLoadError = nil
         parsedBlocks = [:]
         postsById = [:]
         let isNewTopic = lastLoadedTopicId != id
@@ -192,6 +549,7 @@ final class TopicDetailViewModel {
         } catch {
             debugLog("[TopicDetail] Load failed: \(error)")
             errorMessage = error.localizedDescription
+            lastLoadError = error
         }
 
         isLoading = false

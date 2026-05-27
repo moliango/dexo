@@ -5,8 +5,14 @@ extension UIViewController {
     /// If `error` indicates the request was intercepted by Cloudflare's
     /// challenge, prompts the user to pass it. Returns true if the prompt was
     /// shown, so callers can suppress generic error alerts on that path.
+    ///
+    /// The challenge flow targets `linux.do/challenge`, so the prompt is
+    /// suppressed for any other forum even if its response trips the CF
+    /// detector — sending the user to linux.do wouldn't refresh their cookies
+    /// for the forum they were actually browsing.
     @discardableResult
-    func presentChallengePromptIfNeeded(error: Error) -> Bool {
+    func presentChallengePromptIfNeeded(error: Error, on api: DiscourseAPI) -> Bool {
+        guard api.isLinuxDo else { return false }
         guard (error as? DiscourseAPIError)?.isChallengeRequired == true else {
             return false
         }

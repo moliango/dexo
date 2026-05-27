@@ -128,6 +128,7 @@ extension ReplyPreviewViewController: PostCellDelegate {
     func postCell(didTapToggleDetails detailsIndex: Int, postId: Int) {}
     func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) {}
     func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post) {}
+    func postCell(didToggleCollapseForPostId postId: Int) {}
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool) {}
     func postCell(didTapAvatarForUsername username: String) {}
     func postCell(didTapReaction reactionId: String, forPost post: DiscourseTopicDetail.Post) {}

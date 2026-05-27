@@ -43,6 +43,36 @@ struct DiscourseTopicDetail: Decodable {
         lastReadPostNumber = try? container.decodeIfPresent(Int.self, forKey: .lastReadPostNumber)
     }
 
+    /// Memberwise initializer used to synthesize a `DiscourseTopicDetail` from
+    /// the nested-view response. Kept alongside the decoder init so existing
+    /// code that depends on the topic shape (tags, validReactions, etc.) keeps
+    /// working in tree mode.
+    init(
+        id: Int,
+        title: String,
+        fancyTitle: String?,
+        postsCount: Int,
+        replyCount: Int,
+        categoryId: Int?,
+        createdAt: String,
+        tags: [Tag],
+        postStream: PostStream,
+        validReactions: [String],
+        lastReadPostNumber: Int?
+    ) {
+        self.id = id
+        self.title = title
+        self.fancyTitle = fancyTitle
+        self.postsCount = postsCount
+        self.replyCount = replyCount
+        self.categoryId = categoryId
+        self.createdAt = createdAt
+        self.tags = tags
+        self.postStream = postStream
+        self.validReactions = validReactions
+        self.lastReadPostNumber = lastReadPostNumber
+    }
+
     struct PostStream: Decodable {
         var posts: [Post]
         let stream: [Int]?
@@ -214,6 +244,11 @@ struct DiscourseTopicDetail: Decodable {
         var canBoost: Bool
         var polls: [Poll]
         var pollsVotes: [String: [String]]
+        /// Populated only when this post was decoded from the `/n/...` nested
+        /// view endpoint; flat-stream fetches leave it nil. The view-model
+        /// walks this to build its DFS render order without having to infer
+        /// parent/child links from `replyToPostNumber`.
+        var children: [Post]?
 
         enum CodingKeys: String, CodingKey {
             case id, name, username, cooked, raw
@@ -238,6 +273,7 @@ struct DiscourseTopicDetail: Decodable {
             case canBoost = "can_boost"
             case polls
             case pollsVotes = "polls_votes"
+            case children
         }
 
         init(from decoder: Decoder) throws {
@@ -269,6 +305,68 @@ struct DiscourseTopicDetail: Decodable {
             canBoost = (try? container.decodeIfPresent(Bool.self, forKey: .canBoost)) ?? false
             polls = (try? container.decodeIfPresent([Poll].self, forKey: .polls)) ?? []
             pollsVotes = (try? container.decodeIfPresent([String: [String]].self, forKey: .pollsVotes)) ?? [:]
+            children = try? container.decodeIfPresent([Post].self, forKey: .children)
+        }
+    }
+}
+
+/// Response shape from `GET /n/{slug}/{id}.json` — Discourse's nested-replies
+/// view. `roots` holds the top-level replies (each with its full subtree on
+/// `children`); the OP itself is delivered separately on `op_post`. Pagination
+/// applies to the number of *root* replies returned, signalled by
+/// `hasMoreRoots` + `page`.
+///
+/// `topic` and `opPost` are only sent on the first page; subsequent pages drop
+/// them and just deliver more `roots` — both are optional here so paginated
+/// requests still decode.
+struct DiscourseNestedTopicResponse: Decodable {
+    let roots: [DiscourseTopicDetail.Post]
+    let hasMoreRoots: Bool
+    let page: Int
+    let topic: NestedTopicMeta?
+    let opPost: DiscourseTopicDetail.Post?
+    let sort: String?
+
+    enum CodingKeys: String, CodingKey {
+        case roots
+        case hasMoreRoots = "has_more_roots"
+        case page
+        case topic
+        case opPost = "op_post"
+        case sort
+    }
+
+    struct NestedTopicMeta: Decodable {
+        let id: Int
+        let title: String
+        let fancyTitle: String?
+        let slug: String?
+        let postsCount: Int
+        let replyCount: Int
+        let categoryId: Int?
+        let createdAt: String?
+        let tags: [DiscourseTopicDetail.Tag]
+
+        enum CodingKeys: String, CodingKey {
+            case id, title, slug, tags
+            case fancyTitle = "fancy_title"
+            case postsCount = "posts_count"
+            case replyCount = "reply_count"
+            case categoryId = "category_id"
+            case createdAt = "created_at"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(Int.self, forKey: .id)
+            title = try container.decode(String.self, forKey: .title)
+            fancyTitle = try? container.decodeIfPresent(String.self, forKey: .fancyTitle)
+            slug = try? container.decodeIfPresent(String.self, forKey: .slug)
+            postsCount = (try? container.decodeIfPresent(Int.self, forKey: .postsCount)) ?? 0
+            replyCount = (try? container.decodeIfPresent(Int.self, forKey: .replyCount)) ?? 0
+            categoryId = try? container.decodeIfPresent(Int.self, forKey: .categoryId)
+            createdAt = try? container.decodeIfPresent(String.self, forKey: .createdAt)
+            tags = (try? container.decodeIfPresent([DiscourseTopicDetail.Tag].self, forKey: .tags)) ?? []
         }
     }
 }

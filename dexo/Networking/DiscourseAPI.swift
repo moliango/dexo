@@ -93,6 +93,22 @@ final class DiscourseAPI {
         try await request(route: .post(id: id))
     }
 
+    /// Fetch a single post by its floor (`post_number`) within a topic. Needed
+    /// when the only handle is the floor number — `allPostIds` is dense over
+    /// the visible stream while `post_number` skips deleted floors, so the
+    /// two cannot be mapped by index.
+    func fetchPostByNumber(topicId: Int, postNumber: Int) async throws -> DiscourseTopicDetail.Post {
+        try await request(route: .postByNumber(topicId: topicId, postNumber: postNumber))
+    }
+
+    /// Fetch the entire reply tree for a topic in one request via Discourse's
+    /// new `/n/{slug}/{id}.json` endpoint. Use this in tree mode so the tree
+    /// is complete regardless of which floors would have been on the current
+    /// paginated batch.
+    func fetchNestedTopic(id: Int, slug: String? = nil, sort: String? = nil, page: Int = 0) async throws -> DiscourseNestedTopicResponse {
+        try await request(route: .nestedTopic(id: id, slug: slug, sort: sort, page: page))
+    }
+
     func fetchPostReplies(postId: Int) async throws -> [DiscourseTopicDetail.Post] {
         try await request(route: .postReplies(postId: postId))
     }

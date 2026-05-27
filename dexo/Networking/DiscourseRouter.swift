@@ -9,7 +9,13 @@ enum DiscourseRouter {
     case categories
     case topic(id: Int, nearPostNumber: Int? = nil, filter: String? = nil)
     case topicPosts(topicId: Int, postIds: [Int])
+    /// `GET /n/{slug}/{id}.json` — Discourse's nested-replies view. Each call
+    /// returns one page of root-level replies (~20) with their full subtrees;
+    /// `has_more_roots` in the response signals whether further `page=N+1`
+    /// requests are needed.
+    case nestedTopic(id: Int, slug: String?, sort: String?, page: Int)
     case post(id: Int)
+    case postByNumber(topicId: Int, postNumber: Int)
     case notifications(limit: Int? = nil, filter: String? = nil)
     case privateMessages(username: String)
     case createTopic
@@ -90,8 +96,19 @@ enum DiscourseRouter {
         case .topicPosts(let topicId, let postIds):
             let ids = postIds.map { "post_ids[]=\($0)" }.joined(separator: "&")
             return "/t/\(topicId)/posts.json?\(ids)"
+        case .nestedTopic(let id, let slug, let sort, let page):
+            // Discourse accepts `-` as a slug placeholder, so first opens
+            // (when we don't have the slug yet) still work.
+            let slugComponent = slug.map { $0.isEmpty ? "-" : $0 } ?? "-"
+            var params: [String] = []
+            if let sort, !sort.isEmpty { params.append("sort=\(sort)") }
+            if page > 0 { params.append("page=\(page)") }
+            let query = params.isEmpty ? "" : "?" + params.joined(separator: "&")
+            return "/n/\(slugComponent)/\(id).json\(query)"
         case .post(let id):
             return "/posts/\(id).json"
+        case .postByNumber(let topicId, let postNumber):
+            return "/posts/by_number/\(topicId)/\(postNumber).json"
         case .notifications(let limit, let filter):
             var path = "/notifications.json"
             var params: [String] = []
