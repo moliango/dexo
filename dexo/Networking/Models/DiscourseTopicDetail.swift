@@ -249,6 +249,13 @@ struct DiscourseTopicDetail: Decodable {
         /// walks this to build its DFS render order without having to infer
         /// parent/child links from `replyToPostNumber`.
         var children: [Post]?
+        /// True for placeholder entries the nested-replies endpoint inserts
+        /// in place of deleted posts. These have empty `cooked`, no author,
+        /// and the only meaningful fields are `post_number` + the tree
+        /// structure on `children`. The cell renders them as a slim
+        /// "(deleted)" marker so connector lines stay intact without
+        /// claiming a real author / content.
+        let deletedPostPlaceholder: Bool
 
         enum CodingKeys: String, CodingKey {
             case id, name, username, cooked, raw
@@ -274,6 +281,7 @@ struct DiscourseTopicDetail: Decodable {
             case polls
             case pollsVotes = "polls_votes"
             case children
+            case deletedPostPlaceholder = "deleted_post_placeholder"
         }
 
         init(from decoder: Decoder) throws {
@@ -310,6 +318,7 @@ struct DiscourseTopicDetail: Decodable {
             polls = (try? container.decodeIfPresent([Poll].self, forKey: .polls)) ?? []
             pollsVotes = (try? container.decodeIfPresent([String: [String]].self, forKey: .pollsVotes)) ?? [:]
             children = try? container.decodeIfPresent([Post].self, forKey: .children)
+            deletedPostPlaceholder = (try? container.decodeIfPresent(Bool.self, forKey: .deletedPostPlaceholder)) ?? false
         }
     }
 }

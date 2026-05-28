@@ -2304,6 +2304,22 @@
         }
       }
     },
+    "post.deleted_placeholder" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(deleted)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "(已删除)"
+          }
+        }
+      }
+    },
     "reply.preview.title %@" : {
       "localizations" : {
         "en" : {

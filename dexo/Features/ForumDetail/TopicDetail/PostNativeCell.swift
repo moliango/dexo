@@ -975,6 +975,37 @@ final class PostNativeCell: UITableViewCell {
                 avatarImageView.sd_setImage(with: url, context: ImageCacheManager.shared.avatarContext)
             }
         }
+
+        // Deleted-post placeholders are stand-in entries the nested-replies
+        // endpoint emits so the tree topology stays intact. They carry no
+        // author / content — render a slim "(deleted)" marker and hide every
+        // affordance that doesn't apply.
+        if post.deletedPostPlaceholder {
+            applyDeletedPlaceholderChrome()
+        }
+    }
+
+    private func applyDeletedPlaceholderChrome() {
+        nameLabel.attributedText = nil
+        nameLabel.text = String(localized: "post.deleted_placeholder")
+        nameLabel.textColor = .tertiaryLabel
+        nameBackgroundView.isHidden = true
+        usernameLabel.isHidden = true
+        timeLabel.isHidden = true
+        floorLabel.isHidden = true
+        replyToLabel.isHidden = true
+        userTitleLabel.isHidden = true
+        flairImageView.isHidden = true
+        avatarImageView.sd_cancelCurrentImageLoad()
+        avatarImageView.image = nil
+        avatarImageView.backgroundColor = .tertiarySystemFill
+        replyButton.isHidden = true
+        reactButton.isHidden = true
+        boostButton.isHidden = true
+        moreButton.isHidden = true
+        showRepliesButton.isHidden = true
+        reactionStackView.isHidden = true
+        cancelUserReactionImageLoad()
     }
 
     /// Show the user's chosen reaction emoji as an overlay on top of the
@@ -1428,7 +1459,12 @@ final class PostNativeCell: UITableViewCell {
         boostButton.isHidden = false
         boostButton.isEnabled = true
         moreButton.menu = nil
+        moreButton.isHidden = false
         separatorLine.isHidden = false
+        // Reset any deleted-placeholder customisations so the next cell reuse
+        // sees a clean slate (nameLabel color, avatar background fill).
+        nameLabel.textColor = .label
+        avatarImageView.backgroundColor = nil
     }
 
     private static let isoFormatter: ISO8601DateFormatter = {
