@@ -172,7 +172,7 @@ final class PostNativeCell: UITableViewCell {
         return treeAvatarIndent(forDepth: depth) + treeContentExtraShift
     }
 
-    private static let symbolConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+    private static let symbolConfig = UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)
 
     // Pre-rendered fallback images so the hot configure / prepareForReuse paths
     // don't re-allocate them on every cell reuse.
@@ -181,8 +181,11 @@ final class PostNativeCell: UITableViewCell {
     private static let boostFallbackImage = UIImage(named: "roket.symbols", in: nil, with: symbolConfig)
 
     /// Horizontal / vertical padding applied to the OP name pill around `nameLabel`.
-    private static let opPillHorizontalPadding: CGFloat = 5
-    private static let opPillVerticalPadding: CGFloat = 2
+    /// Vertical is 0 — the label's intrinsic line height already overshoots
+    /// the rendered glyph height, so any padding makes the pill look taller
+    /// than the avatar's centerline and visually unbalanced.
+    private static let opPillHorizontalPadding: CGFloat = 4
+    private static let opPillVerticalPadding: CGFloat = 0
 
     weak var delegate: PostCellDelegate?
     private(set) var postId: Int = 0
@@ -246,7 +249,7 @@ final class PostNativeCell: UITableViewCell {
     private let nameBackgroundView: UIView = {
         let v = UIView()
         v.translatesAutoresizingMaskIntoConstraints = false
-        v.layer.cornerRadius = 4
+        v.layer.cornerRadius = 3
         v.layer.cornerCurve = .continuous
         v.isHidden = true
         return v
@@ -610,32 +613,31 @@ final class PostNativeCell: UITableViewCell {
             bottomLeftStack.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
 
             moreButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            moreButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            moreButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
             moreButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            moreButton.widthAnchor.constraint(equalToConstant: 28),
+            moreButton.widthAnchor.constraint(equalToConstant: 36),
             { let c = moreButton.bottomAnchor.constraint(equalTo: separatorLine.topAnchor, constant: -6); c.priority = .init(999); return c }(),
 
             replyButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            replyButton.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor),
+            replyButton.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: -4),
             replyButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            replyButton.widthAnchor.constraint(equalToConstant: 28),
+            replyButton.widthAnchor.constraint(equalToConstant: 36),
 
             reactButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            reactButton.trailingAnchor.constraint(equalTo: boostButton.leadingAnchor),
+            reactButton.trailingAnchor.constraint(equalTo: boostButton.leadingAnchor, constant: -4),
             reactButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            // Match the visual rhythm of the other 28pt buttons; allow growth
-            // so the like count " N" still fits when no reactions plugin.
-            reactButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 28),
+            reactButton.widthAnchor.constraint(equalToConstant: 36),
 
-            userReactionImageView.widthAnchor.constraint(equalToConstant: 14),
-            userReactionImageView.heightAnchor.constraint(equalToConstant: 14),
+            userReactionImageView.widthAnchor.constraint(equalToConstant: 18),
+            userReactionImageView.heightAnchor.constraint(equalToConstant: 18),
             userReactionImageView.centerYAnchor.constraint(equalTo: reactButton.centerYAnchor),
             // Centered like the heart symbol so the swap looks in-place.
             userReactionImageView.centerXAnchor.constraint(equalTo: reactButton.centerXAnchor),
 
             boostButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            boostButton.trailingAnchor.constraint(equalTo: replyButton.leadingAnchor),
+            boostButton.trailingAnchor.constraint(equalTo: replyButton.leadingAnchor, constant: -4),
             boostButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            boostButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 36),
 
             separatorLine.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             separatorLine.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -714,7 +716,9 @@ final class PostNativeCell: UITableViewCell {
         let contentIndent = Self.treeContentIndent(forDepth: treeDepth)
         avatarLeading.constant = 12 + avatarIndent
         contentStackLeading.constant = 12 + contentIndent
-        let defaultBottomLeading: CGFloat = 16 + avatarIndent
+        // In tree mode, align the reactions/bottom-left row with the content
+        // body's leading edge instead of the avatar's column.
+        let defaultBottomLeading: CGFloat = treeLineState != nil ? (12 + contentIndent) : 16
         bottomLeftStackLeading.constant = defaultBottomLeading
 
         if let treeLineState {
@@ -828,7 +832,9 @@ final class PostNativeCell: UITableViewCell {
             }
         }
 
-        if let replyUser = post.replyToUser {
+        // Tree mode already draws parent/child connector lines, so the reply
+        // badge is redundant — hide it.
+        if let replyUser = post.replyToUser, !inTreeModeForFloor {
             let attachment = NSTextAttachment()
             let symbolConfig = UIImage.SymbolConfiguration(pointSize: 10, weight: .medium)
             attachment.image = UIImage(systemName: "arrowshape.turn.up.left.fill", withConfiguration: symbolConfig)?.withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
@@ -837,6 +843,7 @@ final class PostNativeCell: UITableViewCell {
             replyToLabel.attributedText = attrStr
             replyToLabel.isHidden = false
         } else {
+            replyToLabel.attributedText = nil
             replyToLabel.isHidden = true
         }
 
@@ -858,10 +865,8 @@ final class PostNativeCell: UITableViewCell {
         let liked = likeAction?.acted == true
         let canAct = likeAction?.canAct == true
         let likeCount = likeAction?.count ?? 0
-        // When the reactions plugin is active (validReactions non-empty), the
-        // reactionStackView owns the count + "liked" indication —
-        // `reaction_users_count == actions_summary[id==2].count`. Keep the
-        // heart button as a plain action affordance: no count, no red fill.
+        // The reactions row already shows the count; keep the heart as a
+        // plain action affordance with no inline number on the button.
         let reactionsPluginActive = !validReactions.isEmpty
         reactButton.setTitle(nil, for: .normal)
         // Always set the heart symbol — overlay (userReactionImageView) hides
@@ -873,17 +878,15 @@ final class PostNativeCell: UITableViewCell {
             applyUserReactionImage(userReaction.id)
         } else {
             cancelUserReactionImageLoad()
-            if !reactionsPluginActive, likeCount > 0 {
-                reactButton.setTitle(" \(likeCount)", for: .normal)
-            }
             reactButton.tintColor = (liked && !reactionsPluginActive) ? .systemRed : .tertiaryLabel
         }
         // Enabled when the user can like, or has already liked (and may undo).
         reactButton.isEnabled = canAct || liked
-        // Hide entirely when there's nothing to show — own post with zero likes
-        // and no reactions plugin to provide the affordance. Caller can also
-        // force-hide (e.g., a forum where the like affordance is suppressed).
-        reactButton.isHidden = hidesLikeButton || (!canAct && !liked && likeCount == 0 && !reactionsPluginActive)
+        // Hide the button outright whenever it would be tappable-disabled —
+        // a greyed-out heart adds noise without offering anything to do.
+        // `hidesLikeButton` is the external force-hide (e.g. forums where the
+        // affordance is suppressed entirely).
+        reactButton.isHidden = hidesLikeButton || (!canAct && !liked)
         if hidesLikeButton {
             reactButton.isEnabled = false
             cancelUserReactionImageLoad()

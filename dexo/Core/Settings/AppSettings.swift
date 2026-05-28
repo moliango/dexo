@@ -172,6 +172,13 @@ final class AppSettings {
         set { defaults.set(newValue, forKey: "topicTreeMode") }
     }
 
+    /// Sort order for the nested tree endpoint. One of "top", "new", "old".
+    /// Persists the user's last choice across topic opens.
+    var topicTreeSort: String {
+        get { defaults.string(forKey: "topicTreeSort") ?? "top" }
+        set { defaults.set(newValue, forKey: "topicTreeSort") }
+    }
+
     var boostDisplayMode: BoostDisplayMode {
         get { BoostDisplayMode(rawValue: defaults.integer(forKey: "boostDisplayMode")) ?? .danmaku }
         set { defaults.set(newValue.rawValue, forKey: "boostDisplayMode") }

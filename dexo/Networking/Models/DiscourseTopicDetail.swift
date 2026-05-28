@@ -279,15 +279,19 @@ struct DiscourseTopicDetail: Decodable {
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(Int.self, forKey: .id)
-            username = try container.decode(String.self, forKey: .username)
+            // Some nested-replies sorts (new/old) include anonymized or
+            // deleted authors with the `username` key omitted entirely. Don't
+            // hard-fail the whole tree decode in that case — fall back to a
+            // placeholder so the post still renders.
+            username = (try? container.decodeIfPresent(String.self, forKey: .username)) ?? ""
             name = (try? container.decodeIfPresent(String.self, forKey: .name))
-                .flatMap { $0.isEmpty ? nil : $0 } ?? username
-            avatarTemplate = try container.decodeIfPresent(String.self, forKey: .avatarTemplate)
-            createdAt = try container.decode(String.self, forKey: .createdAt)
-            cooked = try container.decode(String.self, forKey: .cooked)
+                .flatMap { $0.isEmpty ? nil : $0 } ?? (username.isEmpty ? nil : username)
+            avatarTemplate = try? container.decodeIfPresent(String.self, forKey: .avatarTemplate)
+            createdAt = (try? container.decodeIfPresent(String.self, forKey: .createdAt)) ?? ""
+            cooked = (try? container.decodeIfPresent(String.self, forKey: .cooked)) ?? ""
             raw = try? container.decodeIfPresent(String.self, forKey: .raw)
-            postNumber = try container.decode(Int.self, forKey: .postNumber)
-            replyCount = try container.decode(Int.self, forKey: .replyCount)
+            postNumber = (try? container.decodeIfPresent(Int.self, forKey: .postNumber)) ?? 0
+            replyCount = (try? container.decodeIfPresent(Int.self, forKey: .replyCount)) ?? 0
             replyToPostNumber = try? container.decodeIfPresent(Int.self, forKey: .replyToPostNumber)
             replyToUser = try? container.decodeIfPresent(ReplyToUser.self, forKey: .replyToUser)
             actionCode = try? container.decodeIfPresent(String.self, forKey: .actionCode)
@@ -326,6 +330,11 @@ struct DiscourseNestedTopicResponse: Decodable {
     let topic: NestedTopicMeta?
     let opPost: DiscourseTopicDetail.Post?
     let sort: String?
+    /// Set when the server returned the standard flat post-stream layout
+    /// in response to `/n/.../json` — e.g. private messages, which bypass
+    /// the nested view. The caller should fall back to standard topic
+    /// rendering when this is non-nil.
+    let flatTopic: DiscourseTopicDetail?
 
     enum CodingKeys: String, CodingKey {
         case roots
@@ -334,6 +343,37 @@ struct DiscourseNestedTopicResponse: Decodable {
         case topic
         case opPost = "op_post"
         case sort
+        case postStream = "post_stream"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        if c.contains(.roots) {
+            roots = (try? c.decode([DiscourseTopicDetail.Post].self, forKey: .roots)) ?? []
+            hasMoreRoots = (try? c.decodeIfPresent(Bool.self, forKey: .hasMoreRoots)) ?? false
+            page = (try? c.decodeIfPresent(Int.self, forKey: .page)) ?? 0
+            topic = try? c.decodeIfPresent(NestedTopicMeta.self, forKey: .topic)
+            opPost = try? c.decodeIfPresent(DiscourseTopicDetail.Post.self, forKey: .opPost)
+            sort = try? c.decodeIfPresent(String.self, forKey: .sort)
+            flatTopic = nil
+        } else if c.contains(.postStream) {
+            // Server returned the standard topic layout — decode it off the
+            // same payload so the caller can fall back without a second
+            // round-trip.
+            roots = []
+            hasMoreRoots = false
+            page = 0
+            topic = nil
+            opPost = nil
+            sort = nil
+            flatTopic = try DiscourseTopicDetail(from: decoder)
+        } else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .roots,
+                in: c,
+                debugDescription: "Nested response missing both `roots` and `post_stream`"
+            )
+        }
     }
 
     struct NestedTopicMeta: Decodable {

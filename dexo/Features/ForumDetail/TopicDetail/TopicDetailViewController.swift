@@ -395,6 +395,42 @@ final class TopicDetailViewController: ObservableViewController {
         return spinner
     }()
 
+    /// Shown in place of `footerSpinner` when a load-more attempt failed.
+    /// Keeps the same 44pt footer slot so the table doesn't visibly shift —
+    /// just a tertiary-tinted refresh icon + label centered in the spinner's
+    /// usual position. Tap fires the same load-more flow as auto-pagination.
+    private lazy var footerRetryView: UIControl = {
+        let control = UIControl()
+        control.frame = CGRect(x: 0, y: 0, width: 0, height: 44)
+
+        let icon = UIImageView(image: UIImage(
+            systemName: "arrow.clockwise",
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 12, weight: .regular)
+        ))
+        icon.tintColor = .tertiaryLabel
+
+        let label = UILabel()
+        label.text = String(localized: "topic_detail.load_more_retry")
+        label.font = FontManager.shared.font(size: 13)
+        label.textColor = .tertiaryLabel
+
+        let stack = UIStackView(arrangedSubviews: [icon, label])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 6
+        stack.isUserInteractionEnabled = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        control.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.centerXAnchor.constraint(equalTo: control.centerXAnchor),
+            stack.centerYAnchor.constraint(equalTo: control.centerYAnchor),
+        ])
+
+        control.addTarget(self, action: #selector(footerRetryTapped), for: .touchUpInside)
+        return control
+    }()
+
     private lazy var topLoadingBar: UIView = {
         let bar = UIView()
         bar.translatesAutoresizingMaskIntoConstraints = false
@@ -423,6 +459,18 @@ final class TopicDetailViewController: ObservableViewController {
     }()
 
     private let bottomBar = TopicDetailBottomBar()
+
+    /// Draggable reply FAB used only in tree mode (where the bottom-bar's
+    /// floor controls are hidden and a centered single button would look off).
+    /// Hidden in flat mode; the bottom bar handles reply there.
+    private let floatingReplyButton = FloatingReplyButton()
+    private var floatingReplyButtonPositioned: Bool = false
+    /// Mirrors `viewModel.isTreeMode` so `updateUI` can refresh tree-mode-
+    /// dependent affordances (right bar button, bottom-bar visibility) on
+    /// the first cycle after the VM flips the flag — e.g. when a PM load
+    /// silently downgrades tree mode to flat because the nested endpoint
+    /// returned the standard post-stream layout.
+    private var lastSeenTreeMode: Bool?
 
     private var jumpScrubber: JumpScrubberOverlay?
     private var jumpScrubStartLocation: CGPoint = .zero
@@ -482,6 +530,7 @@ final class TopicDetailViewController: ObservableViewController {
         // Restore the user's preferred reading mode from the previous session
         // so opening a topic doesn't reset their choice.
         viewModel.isTreeMode = AppSettings.shared.topicTreeMode
+        viewModel.treeSort = AppSettings.shared.topicTreeSort
         navigationItem.rightBarButtonItem = treeModeBarButtonItem()
         updateBottomBarVisibility()
 //        tableView.tableFooterView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
@@ -490,9 +539,11 @@ final class TopicDetailViewController: ObservableViewController {
         view.addSubview(activityIndicator)
         view.addSubview(errorLabel)
         view.addSubview(bottomBar)
+        view.addSubview(floatingReplyButton)
         view.addSubview(topLoadingBar)
 
         bottomBar.delegate = self
+        floatingReplyButton.addTarget(self, action: #selector(floatingReplyButtonTapped), for: .touchUpInside)
         tableView.tableFooterView = footerSpinner
 
         NSLayoutConstraint.activate([
@@ -667,6 +718,19 @@ final class TopicDetailViewController: ObservableViewController {
             tableView.verticalScrollIndicatorInsets.bottom = bottomInset
         }
 
+        // Keep the floating FAB on-screen after rotations / safe-area changes.
+        // First positioning has to wait until this point because earlier in
+        // `viewDidLoad` the view isn't in a window yet — safe-area insets are
+        // zero, so a default-position computed there lands top-left.
+        if !floatingReplyButton.isHidden, view.bounds.width > 0 {
+            if !floatingReplyButtonPositioned {
+                floatingReplyButton.placeAtDefaultPosition()
+                floatingReplyButtonPositioned = true
+            } else {
+                floatingReplyButton.reclampToParent()
+            }
+        }
+
         warmHeightCacheInBackground()
 
         // Retry the scroll after further layout passes in case the target row's
@@ -745,6 +809,19 @@ final class TopicDetailViewController: ObservableViewController {
     private func treeModeBarButtonItem() -> UIBarButtonItem {
         let name = viewModel.isTreeMode ? "list.bullet.indent" : "list.bullet"
         let image = UIImage(systemName: name)
+        // In tree mode the button doubles as a sort-order menu: tap toggles
+        // tree/flat, long-press opens a sort picker (top/new/old).
+        if viewModel.isTreeMode {
+            let button = UIButton(type: .system)
+            button.setImage(image, for: .normal)
+            button.addTarget(self, action: #selector(treeModeToggleTapped), for: .touchUpInside)
+            button.showsMenuAsPrimaryAction = false
+            button.menu = treeSortMenu()
+            button.accessibilityLabel = String(localized: "topic_detail.tree_mode")
+            let item = UIBarButtonItem(customView: button)
+            item.accessibilityLabel = String(localized: "topic_detail.tree_mode")
+            return item
+        }
         let item = UIBarButtonItem(
             image: image,
             style: .plain,
@@ -755,8 +832,63 @@ final class TopicDetailViewController: ObservableViewController {
         return item
     }
 
+    /// Sort picker shown on long-press of the tree-mode toggle. Hits the same
+    /// nested endpoint with a different `sort` param, then reloads.
+    private func treeSortMenu() -> UIMenu {
+        let current = viewModel.treeSort
+        let options: [(String, String, String)] = [
+            ("top", String(localized: "topic_detail.tree_sort.top"), "flame"),
+            ("new", String(localized: "topic_detail.tree_sort.new"), "clock"),
+            ("old", String(localized: "topic_detail.tree_sort.old"), "clock.arrow.circlepath"),
+        ]
+        let actions = options.map { value, title, symbol -> UIAction in
+            UIAction(
+                title: title,
+                image: UIImage(systemName: symbol),
+                state: current == value ? .on : .off
+            ) { [weak self] _ in
+                self?.applyTreeSort(value)
+            }
+        }
+        return UIMenu(title: String(localized: "topic_detail.tree_sort.title"), children: actions)
+    }
+
+    private func applyTreeSort(_ sort: String) {
+        guard viewModel.isTreeMode, viewModel.treeSort != sort else { return }
+        viewModel.treeSort = sort
+        AppSettings.shared.topicTreeSort = sort
+        invalidateRenderCaches()
+        let token = enterPaginationContext(.jumping)
+        Task { [weak self] in
+            guard let self else { return }
+            await self.viewModel.loadNestedTopic(id: self.topicId, sort: sort)
+            self.handleLoadErrorIfNeeded()
+            guard self.paginationTokenIsCurrent(token) else { return }
+            let snapshot = self.buildSnapshot()
+            await self.dataSource.applySnapshotUsingReloadData(snapshot)
+            self.endPaginationContext(token)
+            self.navigationItem.rightBarButtonItem = self.treeModeBarButtonItem()
+        }
+    }
+
     private func updateBottomBarVisibility() {
-        bottomBar.hidesFloorControls = viewModel.isTreeMode
+        let isTree = viewModel.isTreeMode
+        bottomBar.hidesFloorControls = isTree
+        // Tree mode hides the entire bottom bar in favor of the floating FAB
+        // (the bar would otherwise contain just one centered reply button).
+        bottomBar.isHidden = isTree
+        floatingReplyButton.isHidden = !isTree
+        if isTree {
+            view.bringSubviewToFront(floatingReplyButton)
+            // Actual placement happens in `viewDidLayoutSubviews` once the
+            // view has real bounds + safe-area insets. Trigger a layout so
+            // that runs promptly when we toggled mid-session.
+            view.setNeedsLayout()
+        }
+    }
+
+    @objc private func floatingReplyButtonTapped() {
+        replyButtonTapped()
     }
 
     @objc private func treeModeToggleTapped() {
@@ -989,6 +1121,14 @@ final class TopicDetailViewController: ObservableViewController {
             let ms = (CACurrentMediaTime() - uiStart) * 1000
             if ms > 1 { FrameDropDetector.shared.log("updateUI \(String(format: "%.1f", ms))ms") }
         }
+        // Refresh tree-mode-dependent chrome when the VM flips the flag —
+        // see `lastSeenTreeMode` doc for why.
+        if lastSeenTreeMode != viewModel.isTreeMode {
+            lastSeenTreeMode = viewModel.isTreeMode
+            navigationItem.rightBarButtonItem = treeModeBarButtonItem()
+            updateBottomBarVisibility()
+        }
+
         // Title header (set once, but rebuild when canLoadEarlier changes after a jump)
         if let topic = viewModel.topic, !hasTitleHeader {
             let displayTitle = topic.fancyTitle ?? topic.title
@@ -1012,13 +1152,21 @@ final class TopicDetailViewController: ObservableViewController {
             errorLabel.isHidden = true
         }
 
-        // Footer spinner — avoid replacing tableFooterView repeatedly as it changes contentSize
-        if viewModel.isLoadingMore {
+        // Footer slot — avoid replacing tableFooterView repeatedly as it
+        // changes contentSize. Three states share the slot: spinner while a
+        // load-more is in flight, retry control when one failed, otherwise
+        // a zero-height placeholder.
+        if viewModel.loadMoreFailed {
+            if footerSpinner.isAnimating { footerSpinner.stopAnimating() }
+            if tableView.tableFooterView !== footerRetryView {
+                tableView.tableFooterView = footerRetryView
+            }
+        } else if viewModel.isLoadingMore {
             if tableView.tableFooterView !== footerSpinner {
                 tableView.tableFooterView = footerSpinner
             }
             footerSpinner.startAnimating()
-        } else if footerSpinner.isAnimating {
+        } else if footerSpinner.isAnimating || tableView.tableFooterView === footerRetryView {
             footerSpinner.stopAnimating()
             tableView.tableFooterView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
         }
@@ -1938,8 +2086,11 @@ extension TopicDetailViewController: UITableViewDelegate {
         // Load more (forward) — trigger on the last row so the spinner is visible.
         // In reverse mode the bottom of the table is the oldest non-OP loaded
         // post, so what the user wants next is canonically *earlier* posts.
+        // Pause auto-trigger when the previous attempt failed: the footer
+        // retry control is the explicit handoff to the user.
         guard indexPath.row >= totalRows - 1,
-              case .idle = paginationContext
+              case .idle = paginationContext,
+              !viewModel.loadMoreFailed
         else { return }
         if viewModel.isTreeMode {
             // Tree mode paginates by root-level replies, not by flat stream
@@ -1953,6 +2104,7 @@ extension TopicDetailViewController: UITableViewDelegate {
                 if !added.isEmpty {
                     applyLoadMoreSnapshot(addedPostIds: added)
                 }
+                handleLoadErrorIfNeeded()
                 endPaginationContext(token)
             }
         } else if viewModel.isReverseOrder {
@@ -1966,6 +2118,7 @@ extension TopicDetailViewController: UITableViewDelegate {
                 if !added.isEmpty {
                     applyLoadMoreSnapshot(addedPostIds: added)
                 }
+                handleLoadErrorIfNeeded()
                 endPaginationContext(token)
             }
         } else {
@@ -1976,6 +2129,7 @@ extension TopicDetailViewController: UITableViewDelegate {
                 if !added.isEmpty {
                     applyLoadMoreSnapshot(addedPostIds: added)
                 }
+                handleLoadErrorIfNeeded()
                 endPaginationContext(token)
             }
         }
@@ -1986,6 +2140,42 @@ extension TopicDetailViewController: UITableViewDelegate {
             cellHeightCache[item] = cell.bounds.height
             if case .post(let postId) = item, let post = viewModel.postsById[postId] {
                 readTracker.recordHidden(postNumber: post.postNumber)
+            }
+        }
+    }
+
+    @objc private func footerRetryTapped() {
+        guard case .idle = paginationContext, viewModel.loadMoreFailed else { return }
+        // Clearing the flag both swaps the spinner back in (via the next
+        // updateUI) and reopens the auto-trigger gate for future rows.
+        viewModel.loadMoreFailed = false
+        if viewModel.isTreeMode {
+            guard viewModel.nestedHasMoreRoots else { return }
+            let token = enterPaginationContext(.loadingMore)
+            Task {
+                let added = await viewModel.loadMoreNestedRoots()
+                guard paginationTokenIsCurrent(token) else { return }
+                if !added.isEmpty { applyLoadMoreSnapshot(addedPostIds: added) }
+                handleLoadErrorIfNeeded()
+                endPaginationContext(token)
+            }
+        } else if viewModel.isReverseOrder {
+            let token = enterPaginationContext(.loadingMore)
+            Task {
+                let added = await viewModel.loadEarlierPosts(containerWidth: view.bounds.width)
+                guard paginationTokenIsCurrent(token) else { return }
+                if !added.isEmpty { applyLoadMoreSnapshot(addedPostIds: added) }
+                handleLoadErrorIfNeeded()
+                endPaginationContext(token)
+            }
+        } else {
+            let token = enterPaginationContext(.loadingMore)
+            Task {
+                let added = await viewModel.loadMorePosts(containerWidth: view.bounds.width)
+                guard paginationTokenIsCurrent(token) else { return }
+                if !added.isEmpty { applyLoadMoreSnapshot(addedPostIds: added) }
+                handleLoadErrorIfNeeded()
+                endPaginationContext(token)
             }
         }
     }
@@ -2296,11 +2486,23 @@ extension TopicDetailViewController: PostCellDelegate {
             let token = self.enterPaginationContext(.jumping)
             Task { [weak self] in
                 guard let self else { return }
-                await self.viewModel.loadTopic(
-                    id: self.topicId,
-                    containerWidth: self.view.bounds.width,
-                    nearPostNumber: newPostNumber
-                )
+                // In tree mode the new reply sits under its parent in the
+                // DFS order, not at the end of a flat stream. Refetch the
+                // server-supplied tree so the position is authoritative,
+                // then scroll to the new post number.
+                if self.viewModel.isTreeMode {
+                    await self.viewModel.loadNestedTopic(id: self.topicId)
+                    // Make sure the new reply is reachable in the visible
+                    // tree even if its parent (or any further ancestor) was
+                    // collapsed when the user tapped reply.
+                    self.viewModel.expandAncestors(ofPostNumber: newPostNumber)
+                } else {
+                    await self.viewModel.loadTopic(
+                        id: self.topicId,
+                        containerWidth: self.view.bounds.width,
+                        nearPostNumber: newPostNumber
+                    )
+                }
                 self.handleLoadErrorIfNeeded()
                 guard self.paginationTokenIsCurrent(token) else { return }
                 // Land the new reply at the bottom of the screen so the

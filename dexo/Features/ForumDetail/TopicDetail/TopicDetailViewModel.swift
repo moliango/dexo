@@ -16,6 +16,9 @@ final class TopicDetailViewModel {
     var isReverseOrder = false
     var isSummaryMode = false
     var isTreeMode = false
+    /// Sort order passed to the nested-replies endpoint when `isTreeMode` is
+    /// active. One of "top", "new", "old".
+    var treeSort: String = "top"
     /// Posts whose subtree the user has collapsed in tree mode. The collapsed
     /// post itself stays visible; its descendants are skipped during DFS.
     /// Cleared when leaving tree mode would just confuse users on next entry,
@@ -27,6 +30,11 @@ final class TopicDetailViewModel {
     /// Cloudflare-challenge cases into the auth prompt instead of just
     /// rendering the message string. Cleared on each new `loadTopic` call.
     var lastLoadError: Error?
+    /// True iff the last `loadMorePosts` / `loadMoreNestedRoots` attempt
+    /// failed. The view-controller swaps the table footer for a retry button
+    /// when this is set and gates automatic load-more triggers until the
+    /// user explicitly retries.
+    var loadMoreFailed: Bool = false
 
     private let api: DiscourseAPI
     private(set) var allPostIds: [Int] = []
@@ -265,6 +273,37 @@ final class TopicDetailViewModel {
         }
     }
 
+    /// Pivot the in-flight `loadNestedTopic` call to a flat-topic load when
+    /// the server returned the standard `post_stream` layout (PMs and other
+    /// archetypes that aren't tree-rendered). We populate the same state
+    /// `loadTopic` would have and flip `isTreeMode` off so the UI follows.
+    private func ingestFlatTopic(_ detail: DiscourseTopicDetail, containerWidth: CGFloat) {
+        isTreeMode = false
+        topic = detail
+        allPostIds = detail.postStream.stream ?? detail.postStream.posts.map(\.id)
+        loadedPostIds = Set(detail.postStream.posts.map(\.id))
+        if detail.postStream.posts.first?.postNumber == 1 {
+            firstPost = detail.postStream.posts.first
+        }
+        if let firstLoadedId = detail.postStream.posts.first?.id,
+           let firstIndex = allPostIds.firstIndex(of: firstLoadedId) {
+            loadedRangeStart = firstIndex
+        } else {
+            loadedRangeStart = 0
+        }
+        if let lastLoadedId = detail.postStream.posts.last?.id,
+           let lastIndex = allPostIds.firstIndex(of: lastLoadedId) {
+            loadedRangeEnd = lastIndex + 1
+        } else {
+            loadedRangeEnd = detail.postStream.posts.count
+        }
+        for post in detail.postStream.posts {
+            parseAndStore(post: post)
+        }
+        if isReady { isReady = false }
+        isReady = true
+    }
+
     /// Recursively collect every post in the nested tree into `postsById` and
     /// `parsedBlocks` so the rest of the view-model (which keys off post IDs)
     /// can find them. Each stored copy has its `children` link cleared to
@@ -294,7 +333,7 @@ final class TopicDetailViewModel {
         let capturedGeneration = loadGeneration
 
         do {
-            let response = try await api.fetchNestedTopic(id: topicId, slug: nil, sort: "top", page: nextPage)
+            let response = try await api.fetchNestedTopic(id: topicId, slug: nil, sort: treeSort, page: nextPage)
             // Bail if the window was reset under us (jumpToFloor, mode flip).
             guard loadGeneration == capturedGeneration else { return [] }
 
@@ -331,6 +370,8 @@ final class TopicDetailViewModel {
             return added
         } catch {
             debugLog("[TopicDetail] Load more nested roots failed: \(error)")
+            loadMoreFailed = true
+            lastLoadError = error
             return []
         }
     }
@@ -348,11 +389,13 @@ final class TopicDetailViewModel {
     /// flat post stream with the server-supplied tree, so opening a tree-mode
     /// topic doesn't suffer the "child paginated out of window" problem the
     /// flat path has.
-    func loadNestedTopic(id: Int, sort: String? = "top") async {
+    func loadNestedTopic(id: Int, sort: String? = nil, containerWidth: CGFloat? = nil) async {
+        let effectiveSort = sort ?? treeSort
         isLoading = true
         isReady = false
         errorMessage = nil
         lastLoadError = nil
+        loadMoreFailed = false
         parsedBlocks = [:]
         postsById = [:]
         let isNewTopic = lastLoadedTopicId != id
@@ -370,7 +413,15 @@ final class TopicDetailViewModel {
         // The router accepts a nil slug and substitutes `-`, which Discourse
         // routes the same way as the real slug. No slug lookup needed.
         do {
-            let response = try await api.fetchNestedTopic(id: id, slug: nil, sort: sort)
+            let response = try await api.fetchNestedTopic(id: id, slug: nil, sort: effectiveSort)
+            // Some archetypes (notably private messages) bypass the nested
+            // view and return the standard flat post-stream off `/n/...`.
+            // Pivot into flat rendering instead of failing the load.
+            if let flat = response.flatTopic {
+                ingestFlatTopic(flat, containerWidth: containerWidth ?? 0)
+                isLoading = false
+                return
+            }
             // First-page response carries the topic metadata and OP; bail if
             // somehow we got a paginated payload here (shouldn't, but be safe).
             guard let opPost = response.opPost, let topicMeta = response.topic else {
@@ -464,10 +515,46 @@ final class TopicDetailViewModel {
     /// stream reordering — and the fast-path scroll only works if it finds the
     /// exact post that lives at `allPostIds[floor - 1]`.
     func visibleRowForFloor(_ floor: Int) -> Int? {
+        // Tree mode uses DFS order, not the canonical stream order — and
+        // `allPostIds` is a hash-keys array there, so `allPostIds[floor-1]`
+        // would address the wrong post entirely. Walk visiblePosts by
+        // postNumber instead.
+        if isTreeMode {
+            return visiblePosts.firstIndex(where: { $0.postNumber == floor })
+        }
         let index = floor - 1
         guard index >= 0, index < allPostIds.count else { return nil }
         let targetId = allPostIds[index]
         return visiblePosts.firstIndex(where: { $0.id == targetId })
+    }
+
+    /// After a reply lands, walk the server-supplied tree to find the new
+    /// post and uncollapse every ancestor on its path. Otherwise a reply made
+    /// inside a collapsed subtree would be invisible after the refresh — the
+    /// post exists in `postsById` but `visiblePosts` filters it out.
+    func expandAncestors(ofPostNumber postNumber: Int) {
+        guard let roots = nestedTreeRoots else { return }
+        var ancestors: [Int] = []
+        _ = findAncestorPostIds(in: roots, targetPostNumber: postNumber, ancestors: &ancestors)
+        for id in ancestors { collapsedPostIds.remove(id) }
+    }
+
+    private func findAncestorPostIds(
+        in nodes: [DiscourseTopicDetail.Post],
+        targetPostNumber: Int,
+        ancestors: inout [Int]
+    ) -> Bool {
+        for node in nodes {
+            if node.postNumber == targetPostNumber { return true }
+            if let kids = node.children {
+                ancestors.append(node.id)
+                if findAncestorPostIds(in: kids, targetPostNumber: targetPostNumber, ancestors: &ancestors) {
+                    return true
+                }
+                ancestors.removeLast()
+            }
+        }
+        return false
     }
 
     /// Loads the topic. When `nearPostNumber > 1` is supplied, the initial batch
@@ -480,6 +567,7 @@ final class TopicDetailViewModel {
         isReady = false
         errorMessage = nil
         lastLoadError = nil
+        loadMoreFailed = false
         parsedBlocks = [:]
         postsById = [:]
         let isNewTopic = lastLoadedTopicId != id
@@ -639,6 +727,8 @@ final class TopicDetailViewModel {
         do {
             response = try await api.fetchTopicPosts(topicId: topicId, postIds: batch)
         } catch {
+            loadMoreFailed = true
+            lastLoadError = error
             return []
         }
 

@@ -343,8 +343,23 @@ final class ReplyComposerViewController: BaseViewController {
                     replyToPostNumber: replyToPost?.postNumber,
                     raw: raw
                 )
+                if response.enqueued {
+                    // Post is in the moderation queue — there's no floor to
+                    // scroll to yet, so skip the refresh callback and inform
+                    // the user before dismissing.
+                    let alert = UIAlertController(
+                        title: String(localized: "reply.send.enqueued.title"),
+                        message: String(localized: "reply.send.enqueued.message"),
+                        preferredStyle: .alert
+                    )
+                    alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default) { [weak self] _ in
+                        self?.dismiss(animated: true)
+                    })
+                    present(alert, animated: true)
+                    return
+                }
                 let newPostId = response.id
-                let newPostNumber = response.postNumber
+                let newPostNumber = response.postNumber ?? 0
                 dismiss(animated: true) { [weak self] in
                     self?.onPostCreated?(newPostId, newPostNumber)
                 }
