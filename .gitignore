@@ -25,3 +25,6 @@ build/
 
 # CocoaPods (if ever used)
 Pods/
+
+# Local scratch / reference docs
+doc/
