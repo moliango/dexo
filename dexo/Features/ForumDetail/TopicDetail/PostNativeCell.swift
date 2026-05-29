@@ -905,9 +905,12 @@ final class PostNativeCell: UITableViewCell {
         reactButton.isEnabled = canAct || liked
         // Hide the button outright whenever it would be tappable-disabled —
         // a greyed-out heart adds noise without offering anything to do.
+        // Exception: when the reactions plugin is active, always keep the
+        // heart visible so tapping it can open the reaction picker, even on
+        // posts where the plain like action isn't currently actionable.
         // `hidesLikeButton` is the external force-hide (e.g. forums where the
         // affordance is suppressed entirely).
-        reactButton.isHidden = hidesLikeButton || (!canAct && !liked)
+        reactButton.isHidden = hidesLikeButton || (!canAct && !liked && !reactionsPluginActive)
         if hidesLikeButton {
             reactButton.isEnabled = false
             cancelUserReactionImageLoad()
