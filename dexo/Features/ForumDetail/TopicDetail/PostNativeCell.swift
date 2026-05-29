@@ -644,8 +644,12 @@ final class PostNativeCell: UITableViewCell {
             replyButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
             replyButton.widthAnchor.constraint(equalToConstant: 36),
 
+            // Order (right→left): more, reply, react, boost. Keeping react
+            // directly left of reply means a hidden boost button (posts that
+            // don't support boost) leaves its gap on the far left where the
+            // flexible space absorbs it — like and reply stay adjacent.
             reactButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            reactButton.trailingAnchor.constraint(equalTo: boostButton.leadingAnchor, constant: -4),
+            reactButton.trailingAnchor.constraint(equalTo: replyButton.leadingAnchor, constant: -4),
             reactButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
             reactButton.widthAnchor.constraint(equalToConstant: 36),
 
@@ -656,7 +660,7 @@ final class PostNativeCell: UITableViewCell {
             userReactionImageView.centerXAnchor.constraint(equalTo: reactButton.centerXAnchor),
 
             boostButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            boostButton.trailingAnchor.constraint(equalTo: replyButton.leadingAnchor, constant: -4),
+            boostButton.trailingAnchor.constraint(equalTo: reactButton.leadingAnchor, constant: -4),
             boostButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
             boostButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 36),
 
@@ -1312,13 +1316,16 @@ final class PostNativeCell: UITableViewCell {
     }
 
     private func presentReactionPicker(for post: DiscourseTopicDetail.Post) {
-        // Build emoji picker as a 2-row grid in a popover.
+        // Build emoji picker as a 2-row grid in a popover. The popover's own
+        // chrome is hidden (clear background) so we can draw a tighter rounded
+        // card ourselves with a corner radius and padding under our control.
         let pickerVC = UIViewController()
         let emojiSize: CGFloat = 32
-        let hSpacing: CGFloat = 6
-        let vSpacing: CGFloat = 6
-        let hPadding: CGFloat = 12
-        let vPadding: CGFloat = 10
+        let hSpacing: CGFloat = 8
+        let vSpacing: CGFloat = 8
+        let hPadding: CGFloat = 16
+        let vPadding: CGFloat = 14
+        let cornerRadius: CGFloat = 14
 
         // Split reactions into two roughly-equal rows; first row gets the
         // ceiling so an odd count keeps the longer row on top.
@@ -1327,17 +1334,49 @@ final class PostNativeCell: UITableViewCell {
         let row1 = Array(validReactions.prefix(firstRowCount))
         let row2 = Array(validReactions.dropFirst(firstRowCount))
 
+        // Shadow wrapper (no clipping) → rounded card (clips content). Keeping
+        // the shadow and the corner-clip on separate layers avoids the shadow
+        // being trimmed by `clipsToBounds`.
+        let shadowWrapper = UIView()
+        shadowWrapper.translatesAutoresizingMaskIntoConstraints = false
+        shadowWrapper.backgroundColor = .clear
+        shadowWrapper.layer.shadowColor = UIColor.black.cgColor
+        shadowWrapper.layer.shadowOpacity = 0.18
+        shadowWrapper.layer.shadowRadius = 12
+        shadowWrapper.layer.shadowOffset = CGSize(width: 0, height: 4)
+
+        let card = UIView()
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.backgroundColor = ThemeManager.shared.cardBackgroundColor
+        card.layer.cornerRadius = cornerRadius
+        card.layer.cornerCurve = .continuous
+        card.clipsToBounds = true
+
         let outerStack = UIStackView()
         outerStack.axis = .vertical
         outerStack.spacing = vSpacing
         outerStack.alignment = .leading
         outerStack.translatesAutoresizingMaskIntoConstraints = false
-        pickerVC.view.addSubview(outerStack)
+
+        pickerVC.view.backgroundColor = .clear
+        pickerVC.view.addSubview(shadowWrapper)
+        shadowWrapper.addSubview(card)
+        card.addSubview(outerStack)
         NSLayoutConstraint.activate([
-            outerStack.topAnchor.constraint(equalTo: pickerVC.view.topAnchor, constant: vPadding),
-            outerStack.leadingAnchor.constraint(equalTo: pickerVC.view.leadingAnchor, constant: hPadding),
+            shadowWrapper.topAnchor.constraint(equalTo: pickerVC.view.topAnchor),
+            shadowWrapper.leadingAnchor.constraint(equalTo: pickerVC.view.leadingAnchor),
+            shadowWrapper.trailingAnchor.constraint(equalTo: pickerVC.view.trailingAnchor),
+            shadowWrapper.bottomAnchor.constraint(equalTo: pickerVC.view.bottomAnchor),
+            card.topAnchor.constraint(equalTo: shadowWrapper.topAnchor),
+            card.leadingAnchor.constraint(equalTo: shadowWrapper.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: shadowWrapper.trailingAnchor),
+            card.bottomAnchor.constraint(equalTo: shadowWrapper.bottomAnchor),
+            outerStack.topAnchor.constraint(equalTo: card.topAnchor, constant: vPadding),
+            outerStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: hPadding),
             // Don't pin trailing/bottom — let the stack size to its intrinsic
-            // content so we can read the real layout size below.
+            // content so `systemLayoutSizeFitting` below reads the real size.
+            // The card fills the view (== preferredContentSize), so the
+            // trailing/bottom padding ends up exactly hPadding/vPadding.
         ])
 
         for rowIds in [row1, row2] where !rowIds.isEmpty {
@@ -1370,6 +1409,8 @@ final class PostNativeCell: UITableViewCell {
             popover.sourceRect = reactButton.bounds
             popover.permittedArrowDirections = [.down, .up]
             popover.delegate = self
+            // Hide the system popover chrome so only our rounded card shows.
+            popover.backgroundColor = .clear
         }
 
         // Find presenting view controller

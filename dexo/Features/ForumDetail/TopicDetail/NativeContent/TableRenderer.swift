@@ -258,7 +258,17 @@ enum TableRenderer: BlockRenderer {
             }
 
             if isHeader {
-                rowView.backgroundColor = .secondarySystemBackground
+                // Warm, theme-aware header band — `.secondarySystemBackground`
+                // reads as a cold lavender against the warm theme palette.
+                // Mirror the `codeBackgroundColor` recipe (accent blended into
+                // the card surface) but a touch stronger so the header stands
+                // out as a header.
+                let accent = ThemeManager.shared.accentColor
+                let card = ThemeManager.shared.cardBackgroundColor
+                rowView.backgroundColor = UIColor { tc in
+                    accent.resolvedColor(with: tc)
+                        .blended(into: card.resolvedColor(with: tc), ratio: 0.15)
+                }
             }
 
             if rowIndex == 0 {
