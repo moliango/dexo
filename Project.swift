@@ -33,6 +33,7 @@ let project = Project(
                     "dexo/Info.plist",
                     "dexo/Assets.xcassets/**",
                     "dexo/AppIcon.icon/**",
+                    "dexo/AppIconWhite.icon/**",
                     "dexo/AppIconBlack.icon/**",
                     "dexo/AppIconOcean.icon/**",
                     "dexo/AppIconEmber.icon/**",
@@ -42,6 +43,7 @@ let project = Project(
             resources: .resources([
                 .glob(pattern: "dexo/Assets.xcassets/**"),
                 .glob(pattern: "dexo/AppIcon.icon/**"),
+                .glob(pattern: "dexo/AppIconWhite.icon/**"),
                 .glob(pattern: "dexo/AppIconBlack.icon/**"),
                 .glob(pattern: "dexo/AppIconOcean.icon/**"),
                 .glob(pattern: "dexo/AppIconEmber.icon/**"),
@@ -61,7 +63,7 @@ let project = Project(
             ],
             settings: .settings(
                 base: [
-                    "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES": "AppIconBlack AppIconOcean AppIconEmber AppIconForest",
+                    "ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES": "AppIconWhite AppIconBlack AppIconOcean AppIconEmber AppIconForest",
                     "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
                     "ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME": "AccentColor",
                     "ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS": "YES",

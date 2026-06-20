@@ -339,6 +339,22 @@
         }
       }
     },
+    "app_icon.white" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "White"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "白色"
+          }
+        }
+      }
+    },
     "appearance.dark" : {
       "localizations" : {
         "en" : {

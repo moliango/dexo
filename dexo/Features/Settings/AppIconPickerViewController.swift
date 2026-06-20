@@ -141,7 +141,7 @@ private final class AppIconCell: UITableViewCell {
 
     func configure(with option: AppIconOption, isSelected: Bool) {
         backgroundColor = ThemeManager.shared.cardBackgroundColor
-        previewImageView.image = UIImage(named: option.imageName) ?? UIImage(systemName: "app")
+        previewImageView.image = UIImage(named: option.previewImageName) ?? UIImage(systemName: "app")
         nameLabel.text = option.title
         nameLabel.font = FontManager.shared.font(size: 17)
         accessoryType = isSelected ? .checkmark : .none
