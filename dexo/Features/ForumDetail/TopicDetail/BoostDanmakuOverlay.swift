@@ -23,28 +23,16 @@ final class BoostDanmakuCellModel: DanmakuCellModel {
 
 // MARK: - Cell
 
+private enum BoostDanmakuLayout {
+    static let horizontalPadding: CGFloat = 10
+    static let trailingPadding: CGFloat = 10
+    static let minimumTextWidth: CGFloat = 10
+    static let minimumChipHeight: CGFloat = 26
+    static let verticalPadding: CGFloat = 2
+}
+
 final class BoostDanmakuCell: DanmakuCell {
-    private enum Layout {
-        static let horizontalPadding: CGFloat = 2
-        static let trailingPadding: CGFloat = 8
-        static let avatarSize: CGFloat = 20
-        static let textSpacing: CGFloat = 5
-        static let minimumTextWidth: CGFloat = 10
-        static let minimumChipHeight: CGFloat = 26
-    }
-
     private let textFont = FontManager.shared.font(size: 13)
-
-    private let avatarImageView: UIImageView = {
-        let iv = UIImageView()
-        iv.contentMode = .scaleAspectFill
-        iv.clipsToBounds = true
-        iv.layer.cornerRadius = Layout.avatarSize / 2
-        iv.layer.borderWidth = 1.5
-        iv.layer.borderColor = UIColor.systemBackground.cgColor
-        iv.backgroundColor = .secondarySystemBackground
-        return iv
-    }()
 
     private let textView: UITextView = {
         let tv = UITextView()
@@ -62,7 +50,6 @@ final class BoostDanmakuCell: DanmakuCell {
     required init(frame: CGRect) {
         super.init(frame: frame)
         displayAsync = false
-        addSubview(avatarImageView)
         addSubview(textView)
     }
 
@@ -74,18 +61,9 @@ final class BoostDanmakuCell: DanmakuCell {
         guard let model = model as? BoostDanmakuCellModel,
               let boost = model.boost else { return }
 
-        backgroundColor = ThemeManager.shared.codeBackgroundColor
+        backgroundColor = ThemeManager.shared.codeBackgroundColor.withAlphaComponent(0.78)
 
         let baseURL = model.assetBaseURL
-
-        // Avatar
-        let sizedAvatar = boost.user.avatarTemplate?.replacingOccurrences(of: "{size}", with: "48")
-        if let sizedAvatar {
-            let urlString = sizedAvatar.hasPrefix("http") ? sizedAvatar : baseURL + sizedAvatar
-            if let url = URL(string: urlString) {
-                avatarImageView.sd_setImage(with: url, context: ImageCacheManager.shared.avatarContext)
-            }
-        }
 
         // Text
         let inlineNodes = Self.inlineNodes(from: boost.cooked, baseURL: baseURL)
@@ -107,14 +85,8 @@ final class BoostDanmakuCell: DanmakuCell {
     override func layoutSubviews() {
         super.layoutSubviews()
 
-        let avatarY = (bounds.height - Layout.avatarSize) / 2
-        avatarImageView.frame = CGRect(
-            x: Layout.horizontalPadding, y: avatarY,
-            width: Layout.avatarSize, height: Layout.avatarSize
-        )
-
-        let textX = avatarImageView.frame.maxX + Layout.textSpacing
-        let textWidth = max(Layout.minimumTextWidth, bounds.width - textX - Layout.trailingPadding)
+        let textX = BoostDanmakuLayout.horizontalPadding
+        let textWidth = max(BoostDanmakuLayout.minimumTextWidth, bounds.width - textX - BoostDanmakuLayout.trailingPadding)
         let textHeight = max(ceil(textFont.lineHeight),
                              ceil(textView.sizeThatFits(CGSize(width: textWidth, height: .greatestFiniteMagnitude)).height))
         textView.frame = CGRect(
@@ -239,8 +211,8 @@ final class BoostDanmakuOverlay {
             options: .usesLineFragmentOrigin,
             context: nil
         ).size
-        let width = 2 + 20 + 5 + ceil(textSize.width) + 8
-        let height = max(26.0, max(20, ceil(textSize.height)) + 4)
+        let width = BoostDanmakuLayout.horizontalPadding + ceil(textSize.width) + BoostDanmakuLayout.trailingPadding
+        let height = max(BoostDanmakuLayout.minimumChipHeight, ceil(textSize.height) + BoostDanmakuLayout.verticalPadding * 2)
         return CGSize(width: width, height: height)
     }
 }

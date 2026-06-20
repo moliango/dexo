@@ -55,6 +55,12 @@ final class SettingsViewController: ObservableViewController {
         #endif
     }
 
+    private enum AppearanceRow: Int, CaseIterable {
+        case appearanceMode
+        case theme
+        case appIcon
+        case fontSize
+    }
 
     private func networkRows() -> [NetworkRow] {
         var rows: [NetworkRow] = [.dohToggle]
@@ -84,7 +90,7 @@ extension SettingsViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         switch visibleSections[section] {
         case .general: return 2
-        case .appearance: return 3
+        case .appearance: return AppearanceRow.allCases.count
         case .storage: return 1
         case .about: return 1
         case .network: return networkRows().count
@@ -116,11 +122,14 @@ extension SettingsViewController: UITableViewDataSource {
                 return makeBoostDisplayCell(tableView, indexPath: indexPath)
             }
         case .appearance:
-            if indexPath.row == 0 {
+            switch AppearanceRow(rawValue: indexPath.row)! {
+            case .appearanceMode:
                 return makeAppearanceCell(tableView, indexPath: indexPath)
-            } else if indexPath.row == 1 {
+            case .theme:
                 return makeThemeCell(tableView, indexPath: indexPath)
-            } else {
+            case .appIcon:
+                return makeAppIconCell(tableView, indexPath: indexPath)
+            case .fontSize:
                 return makeFontSizeCell(tableView, indexPath: indexPath)
             }
         case .storage:
@@ -181,6 +190,15 @@ extension SettingsViewController: UITableViewDataSource {
         cell.detailTextLabel?.text = themeManager.currentTheme.name
         cell.accessoryType = .disclosureIndicator
 
+        return cell
+    }
+
+    private func makeAppIconCell(_ tableView: UITableView, indexPath: IndexPath) -> UITableViewCell {
+        let cell = UITableViewCell(style: .value1, reuseIdentifier: nil)
+        applyFonts(to: cell)
+        cell.textLabel?.text = String(localized: "settings.app_icon")
+        cell.detailTextLabel?.text = AppIconOption.current.title
+        cell.accessoryType = .disclosureIndicator
         return cell
     }
 
@@ -277,12 +295,19 @@ extension SettingsViewController: UITableViewDelegate {
                 showBoostDisplayPicker(from: sourceView)
             }
         case .appearance:
-            if indexPath.row == 0 {
+            switch AppearanceRow(rawValue: indexPath.row)! {
+            case .appearanceMode:
                 showAppearancePicker(from: sourceView)
-            } else if indexPath.row == 1 {
+            case .theme:
                 let vc = ThemePickerViewController()
                 navigationController?.pushViewController(vc, animated: true)
-            } else {
+            case .appIcon:
+                let vc = AppIconPickerViewController()
+                vc.onSelectionChanged = { [weak self] in
+                    self?.reloadAppearanceSection()
+                }
+                navigationController?.pushViewController(vc, animated: true)
+            case .fontSize:
                 let vc = FontSizeViewController()
                 navigationController?.pushViewController(vc, animated: true)
             }
@@ -335,12 +360,18 @@ extension SettingsViewController {
         }
     }
 
+    private func reloadAppearanceSection() {
+        if let idx = visibleSections.firstIndex(of: .appearance) {
+            tableView.reloadSections(IndexSet(integer: idx), with: .none)
+        }
+    }
+
     private func showAppearancePicker(from sourceView: UIView?) {
         let alert = UIAlertController(title: String(localized: "settings.dark_mode"), message: nil, preferredStyle: .actionSheet)
         for mode in AppSettings.AppearanceMode.allCases {
             let action = UIAlertAction(title: mode.title, style: .default) { [weak self] _ in
                 self?.settings.appearanceMode = mode
-                self?.tableView.reloadSections(IndexSet(integer: Section.appearance.rawValue), with: .none)
+                self?.reloadAppearanceSection()
             }
             if mode == settings.appearanceMode {
                 action.setValue(true, forKey: "checked")
