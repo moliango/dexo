@@ -14,7 +14,7 @@
 
 | 论坛首页  | 帖子详情 | 板块分类 |
 |:---:|:---:|:---:|
-| ![论坛首页](assets/home.png) | ![帖子详情](assets/detail.png) | ![板块分类](assets/cate.png) |
+| ![论坛首页](assets/home.jpg) | ![帖子详情](assets/detail.jpg) | ![板块分类](assets/cate.png) |
 
 
 ## 功能
