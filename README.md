@@ -14,7 +14,7 @@
 
 | Home  | Topic Detail | Categories |
 |:---:|:---:|:---:|
-| ![Home](assets/home.png) | ![Topic Detail](assets/detail.png) | ![Categories](assets/cate.png) |
+| ![Home](assets/home.jpg) | ![Topic Detail](assets/detail.jpg) | ![Categories](assets/cate.png) |
 
 
 ## Features
