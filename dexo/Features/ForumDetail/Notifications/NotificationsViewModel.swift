@@ -1,9 +1,6 @@
 import Foundation
 
-import Perception
-
-@Perceptible
-final class NotificationsViewModel {
+final class NotificationsViewModel: DexoObservableObject {
     var notifications: [DiscourseNotification] = []
     var isLoading = false
     var errorMessage: String?
@@ -19,6 +16,7 @@ final class NotificationsViewModel {
         isLoading = true
         errorMessage = nil
         requiresLogin = false
+        notifyChanged()
         do {
             let result = try await api.fetchNotifications()
             notifications = result.notifications
@@ -29,17 +27,30 @@ final class NotificationsViewModel {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        notifyChanged()
     }
 
-    func markRead(id: Int) async {
-        try? await api.markNotificationRead(id: id)
-        if let index = notifications.firstIndex(where: { $0.id == id }) {
-            notifications[index] = notifications[index].markedAsRead()
+    func markNotificationRead(id: Int) async {
+        guard let index = notifications.firstIndex(where: { $0.id == id }) else { return }
+        guard !notifications[index].read else { return }
+        notifications[index] = notifications[index].markingRead()
+        notifyChanged()
+        do {
+            try await api.markNotificationRead(id: id)
+        } catch {
+            // Keep the optimistic local read state; failing to mark-read should not block navigation.
         }
     }
 
     func markAllRead() async {
-        try? await api.markNotificationRead()
-        notifications = notifications.map { $0.markedAsRead() }
+        guard notifications.contains(where: { !$0.read }) else { return }
+        notifications = notifications.map { $0.markingRead() }
+        notifyChanged()
+        do {
+            try await api.markAllNotificationsRead()
+        } catch {
+            errorMessage = error.localizedDescription
+            notifyChanged()
+        }
     }
 }

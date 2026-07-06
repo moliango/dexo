@@ -1,9 +1,6 @@
 import Foundation
 
-import Perception
-
-@Perceptible
-final class UserProfileViewModel {
+final class UserProfileViewModel: DexoObservableObject {
     var userProfile: DiscourseUserProfile?
     var summary: DiscourseUserSummary?
     var isLoading = false
@@ -11,16 +8,6 @@ final class UserProfileViewModel {
 
     private let api: DiscourseAPI
     let username: String
-
-    /// Whether the current user is viewing their own profile.
-    var isOwnProfile: Bool {
-        let myUsername = AuthManager.shared.username(for: api.baseURL)
-        return myUsername == username
-    }
-
-    var canSendMessage: Bool {
-        userProfile?.canSendPrivateMessageToUser == true
-    }
 
     init(api: DiscourseAPI, username: String) {
         self.api = api
@@ -30,14 +17,17 @@ final class UserProfileViewModel {
     func load() async {
         isLoading = true
         errorMessage = nil
+        notifyChanged()
         do {
-            let profile = try await api.fetchUserProfile(username: username)
-            let userSummary = try? await api.fetchUserSummary(username: username)
+            async let profileTask = api.fetchUserProfile(username: username)
+            async let summaryTask = api.fetchUserSummary(username: username)
+            let (profile, userSummary) = try await (profileTask, summaryTask)
             userProfile = profile
             summary = userSummary
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        notifyChanged()
     }
 }

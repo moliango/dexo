@@ -1,9 +1,6 @@
 import Foundation
 
-import Perception
-
-@Perceptible
-final class AddForumViewModel {
+final class AddForumViewModel: DexoObservableObject {
     var urlString = ""
     var isLoading = false
     var errorMessage: String?
@@ -12,6 +9,7 @@ final class AddForumViewModel {
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             errorMessage = String(localized: "add_forum.error.empty_url")
+            notifyChanged()
             return false
         }
 
@@ -23,11 +21,13 @@ final class AddForumViewModel {
 
         guard URL(string: normalized) != nil else {
             errorMessage = String(localized: "add_forum.error.invalid_url")
+            notifyChanged()
             return false
         }
 
         isLoading = true
         errorMessage = nil
+        notifyChanged()
 
         do {
             let tempForum = ForumInstance.new(title: "", baseURL: normalized)
@@ -39,13 +39,14 @@ final class AddForumViewModel {
                 baseURL: normalized,
                 iconURL: resolveIconURL(base: normalized, info: info)
             )
-            forum.sortOrder = (try? DatabaseManager.shared.nextForumSortOrder()) ?? 0
             try DatabaseManager.shared.saveForum(&forum)
             isLoading = false
+            notifyChanged()
             return true
         } catch {
             errorMessage = String(localized: "add_forum.error.connect \(error.localizedDescription)")
             isLoading = false
+            notifyChanged()
             return false
         }
     }

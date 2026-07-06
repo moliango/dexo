@@ -1,49 +1,25 @@
 import Alamofire
 import Foundation
 
-/// Which Discourse private-message view to fetch. `inbox` is the default
-/// `private-messages` list; `sent` is `private-messages-sent` (messages the
-/// user started, including ones the recipient hasn't replied to yet).
-enum PrivateMessageFilter {
-    case inbox
-    case sent
-
-    /// URL path segment Discourse uses for this view.
-    var pathSegment: String {
-        switch self {
-        case .inbox: return "private-messages"
-        case .sent: return "private-messages-sent"
-        }
-    }
-}
-
 enum DiscourseRouter {
     case latestTopics(page: Int)
+    case topicsByIds([Int])
+    case newTopics(page: Int)
+    case unreadTopics(page: Int)
+    case readTopics(page: Int)
     case hotTopics(page: Int)
     case topTopics(page: Int)
-    case readTopics(page: Int)
     case categories
-    case topic(id: Int, nearPostNumber: Int? = nil, filter: String? = nil)
+    case topic(id: Int, trackVisit: Bool)
     case topicPosts(topicId: Int, postIds: [Int])
-    /// `GET /n/{slug}/{id}.json` — Discourse's nested-replies view. Each call
-    /// returns one page of root-level replies (~20) with their full subtrees;
-    /// `has_more_roots` in the response signals whether further `page=N+1`
-    /// requests are needed.
-    case nestedTopic(id: Int, slug: String?, sort: String?, page: Int)
-    /// `GET /n/{slug}/{topicId}/children/{postNumber}.json` — fetches the
-    /// direct replies under one post in the nested view. The top-level
-    /// `/n/...` payload inlines at most three children per node; this endpoint
-    /// returns the full (paginated) direct-reply list so the UI can expand a
-    /// "view more replies" affordance. `depth=1` keeps it to direct children.
-    case nestedChildren(topicId: Int, postNumber: Int, slug: String?, sort: String?, page: Int)
-    case post(id: Int)
-    case postByNumber(topicId: Int, postNumber: Int)
-    case notifications(limit: Int? = nil, filter: String? = nil)
-    case privateMessages(username: String, filter: PrivateMessageFilter)
+    case notifications
+    case privateMessages(username: String)
+    case privateMessagesSent(username: String)
+    case privateMessagesArchive(username: String)
     case createTopic
-    case createBoost(postId: Int)
     case postReplies(postId: Int)
-    case categoryTopics(slug: String, id: Int, sort: String?, page: Int)
+    case categoryTopics(slug: String, id: Int, page: Int)
+    case categoryFilteredTopics(slug: String, id: Int, filter: String, page: Int)
     case tagTopics(name: String, page: Int)
     case siteInfo
     case basicInfo
@@ -55,108 +31,72 @@ enum DiscourseRouter {
     case bookmarks(username: String)
     case userSummary(username: String)
     case userProfile(username: String)
+    case userBadges(username: String)
+    case pendingInvites(username: String)
+    case createInvite
     case createBookmark
     case deleteBookmark(id: Int)
-    case deleteBoost(id: Int)
-    case uploadImage
     case toggleReaction(postId: Int, reactionId: String)
-    case likePost
-    case unlikePost(postId: Int)
-    case votePoll
-    case removePollVote
-    case markNotificationRead
-    case topicTimings
-    case createPrivateMessage
-    case flagPost
-    case followUser(username: String)
-    case unfollowUser(username: String)
-    case messageBusPoll(clientId: String)
-
+    case createBoost(postId: Int)
+    case upload(clientId: String)
+    
     var method: HTTPMethod {
         switch self {
-        case .createTopic, .createBookmark, .createBoost, .uploadImage, .topicTimings, .messageBusPoll, .likePost, .createPrivateMessage, .flagPost:
+        case .createTopic, .createBookmark, .createInvite, .createBoost, .upload:
             return .post
-        case .toggleReaction, .votePoll, .markNotificationRead, .followUser:
+        case .toggleReaction:
             return .put
-        case .deleteBookmark, .deleteBoost, .removePollVote, .unlikePost, .unfollowUser:
+        case .deleteBookmark:
             return .delete
         default:
             return .get
         }
     }
-
+    
     var path: String {
         switch self {
         case .latestTopics(let page):
             return "/latest.json?page=\(page)"
+        case .topicsByIds(let ids):
+            let joinedIds = ids.map(String.init).joined(separator: ",")
+            return "/latest.json?topic_ids=\(joinedIds)"
+        case .newTopics(let page):
+            return "/new.json?page=\(page)"
+        case .unreadTopics(let page):
+            return "/unread.json?page=\(page)"
+        case .readTopics(let page):
+            return "/read.json?page=\(page)"
         case .hotTopics(let page):
             return "/hot.json?page=\(page)"
         case .topTopics(let page):
             return "/top.json?page=\(page)"
-        case .readTopics(let page):
-            return "/read.json?page=\(page)"
         case .categories:
             return "/categories.json?include_subcategories=true"
-        case .topic(let id, let nearPostNumber, let filter):
-            // `/t/{id}/{N}.json` returns a batch of posts ending at floor N — used
-            // for deep-link entry (notification tap, reply jump) so we avoid
-            // fetching the OP batch just to throw it away. `track_visit` updates
-            // read state; `forceLoad` bypasses cache so a just-created reply shows.
-            var params: [String] = []
-            let basePath: String
-            if let nearPostNumber, nearPostNumber > 1 {
-                basePath = "/t/\(id)/\(nearPostNumber).json"
-                params.append("track_visit=true")
-                params.append("forceLoad=true")
-            } else {
-                basePath = "/t/\(id).json"
+        case .topic(let id, let trackVisit):
+            var path = "/t/\(id).json"
+            if trackVisit {
+                path += "?track_visit=true"
             }
-            if let filter, !filter.isEmpty {
-                params.append("filter=\(filter)")
-            }
-            return params.isEmpty ? basePath : basePath + "?" + params.joined(separator: "&")
+            return path
         case .topicPosts(let topicId, let postIds):
             let ids = postIds.map { "post_ids[]=\($0)" }.joined(separator: "&")
             return "/t/\(topicId)/posts.json?\(ids)"
-        case .nestedTopic(let id, let slug, let sort, let page):
-            // Discourse accepts `-` as a slug placeholder, so first opens
-            // (when we don't have the slug yet) still work.
-            let slugComponent = slug.map { $0.isEmpty ? "-" : $0 } ?? "-"
-            var params: [String] = []
-            if let sort, !sort.isEmpty { params.append("sort=\(sort)") }
-            if page > 0 { params.append("page=\(page)") }
-            let query = params.isEmpty ? "" : "?" + params.joined(separator: "&")
-            return "/n/\(slugComponent)/\(id).json\(query)"
-        case .nestedChildren(let topicId, let postNumber, let slug, let sort, let page):
-            let slugComponent = slug.map { $0.isEmpty ? "-" : $0 } ?? "-"
-            var params: [String] = ["page=\(page)"]
-            if let sort, !sort.isEmpty { params.append("sort=\(sort)") }
-            params.append("depth=1")
-            return "/n/\(slugComponent)/\(topicId)/children/\(postNumber).json?" + params.joined(separator: "&")
-        case .post(let id):
-            return "/posts/\(id).json"
-        case .postByNumber(let topicId, let postNumber):
-            return "/posts/by_number/\(topicId)/\(postNumber).json"
-        case .notifications(let limit, let filter):
-            var path = "/notifications.json"
-            var params: [String] = []
-            if let limit { params.append("limit=\(limit)") }
-            if let filter { params.append("filter=\(filter)") }
-            if !params.isEmpty { path += "?" + params.joined(separator: "&") }
-            return path
-        case .privateMessages(let username, let filter):
-            return "/topics/\(filter.pathSegment)/\(username).json"
+        case .notifications:
+            return "/notifications.json"
+        case .privateMessages(let username):
+            return "/topics/private-messages/\(username).json"
+        case .privateMessagesSent(let username):
+            return "/topics/private-messages-sent/\(username).json"
+        case .privateMessagesArchive(let username):
+            return "/topics/private-messages-archive/\(username).json"
         case .createTopic:
             return "/posts.json"
-        case .createBoost(let postId):
-            return "/discourse-boosts/posts/\(postId)/boosts"
         case .postReplies(let postId):
             return "/posts/\(postId)/replies.json"
-        case .categoryTopics(let slug, let id, let sort, let page):
-            if let sort, !sort.isEmpty {
-                return "/c/\(slug)/\(id)/l/\(sort).json?page=\(page)"
-            }
+        case .categoryTopics(let slug, let id, let page):
             return "/c/\(slug)/\(id).json?page=\(page)"
+        case .categoryFilteredTopics(let slug, let id, let filter, let page):
+            return "/c/\(slug)/\(id)/l/\(filter).json?page=\(page)"
         case .tagTopics(let name, let page):
             return "/tag/\(name).json?page=\(page)"
         case .siteInfo:
@@ -175,9 +115,9 @@ enum DiscourseRouter {
         case .tagSearch(let query, let categoryId):
             let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
             var path = "/tags/filter/search?q=\(encoded)&limit=5"
-            if let categoryId {
-                path += "&categoryId=\(categoryId)&filterForInput=true"
-            }
+            //            if let categoryId {
+            //                path += "&categoryId=\(categoryId)"
+            //            }
             return path
         case .bookmarks(let username):
             return "/u/\(username)/bookmarks.json"
@@ -185,40 +125,23 @@ enum DiscourseRouter {
             return "/u/\(username)/summary.json"
         case .userProfile(let username):
             return "/u/\(username).json"
+        case .userBadges(let username):
+            return "/user-badges/\(username.lowercased()).json?grouped=true"
+        case .pendingInvites(let username):
+            return "/u/\(username)/invited/pending"
+        case .createInvite:
+            return "/invites"
         case .createBookmark:
             return "/bookmarks.json"
         case .deleteBookmark(let id):
             return "/bookmarks/\(id).json"
-        case .deleteBoost(let id):
-            return "/discourse-boosts/boosts/\(id)"
-        case .uploadImage:
-            return "/uploads.json"
         case .toggleReaction(let postId, let reactionId):
             let encoded = reactionId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? reactionId
             return "/discourse-reactions/posts/\(postId)/custom-reactions/\(encoded)/toggle.json"
-        case .likePost:
-            return "/post_actions"
-        case .unlikePost(let postId):
-            // post_action_type_id=2 is "like"
-            return "/post_actions/\(postId)?post_action_type_id=2"
-        case .votePoll:
-            return "/polls/vote"
-        case .removePollVote:
-            return "/polls/vote"
-        case .markNotificationRead:
-            return "/notifications/mark-read"
-        case .topicTimings:
-            return "/topics/timings"
-        case .createPrivateMessage:
-            return "/posts.json"
-        case .flagPost:
-            return "/post_actions"
-        case .followUser(let username):
-            return "/u/\(username)/follow"
-        case .unfollowUser(let username):
-            return "/u/\(username)/follow"
-        case .messageBusPoll(let clientId):
-            return "/message-bus/\(clientId)/poll"
+        case .createBoost(let postId):
+            return "/discourse-boosts/posts/\(postId)/boosts"
+        case .upload(let clientId):
+            return "/uploads.json?client_id=\(clientId)"
         }
     }
 }

@@ -6,7 +6,7 @@ let package = Package(
     name: "CookedHTML",
     platforms: [
         .iOS(.v15),
-        .macOS(.v12),
+        .macOS(.v14),
     ],
     products: [
         .library(name: "CookedHTML", targets: ["CookedHTML"]),

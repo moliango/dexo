@@ -3,47 +3,9 @@ import Security
 
 enum KeychainHelper {
 
-    // MARK: - User API Key (GenericPassword)
+    // MARK: - Legacy Auth Cleanup
 
-    static func saveUserApiKey(_ key: String, for baseURL: String) throws {
-        let data = Data(key.utf8)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.eilgnaw.dexo.userApiKey",
-            kSecAttrAccount as String: baseURL,
-        ]
-
-        // Delete existing item first
-        SecItemDelete(query as CFDictionary)
-
-        var addQuery = query
-        addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
-        guard status == errSecSuccess else {
-            throw KeychainError.unhandledError(status: status)
-        }
-    }
-
-    static func getUserApiKey(for baseURL: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: "com.eilgnaw.dexo.userApiKey",
-            kSecAttrAccount as String: baseURL,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else {
-            return nil
-        }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func deleteUserApiKey(for baseURL: String) {
+    static func deleteLegacyCredential(for baseURL: String) {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: "com.eilgnaw.dexo.userApiKey",
@@ -51,120 +13,17 @@ enum KeychainHelper {
         ]
         SecItemDelete(query as CFDictionary)
     }
-
-    // MARK: - RSA Key Pair
 
     private static func rsaTag(for baseURL: String) -> String {
         "com.eilgnaw.dexo.rsaKey.\(baseURL)"
     }
 
-    @discardableResult
-    static func generateAndStoreRSAKeyPair(for baseURL: String) throws -> SecKey {
-        // Delete any existing key pair first
-        deleteRSAKeyPair(for: baseURL)
-
-        let tag = rsaTag(for: baseURL)
-        let attributes: [String: Any] = [
-            kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
-            kSecAttrKeySizeInBits as String: 4096,
-            kSecPrivateKeyAttrs as String: [
-                kSecAttrIsPermanent as String: true,
-                kSecAttrApplicationTag as String: Data(tag.utf8),
-                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
-            ],
-        ]
-
-        var error: Unmanaged<CFError>?
-        guard let privateKey = SecKeyCreateRandomKey(attributes as CFDictionary, &error) else {
-            throw error!.takeRetainedValue() as Error
-        }
-        return privateKey
-    }
-
-    static func getRSAPrivateKey(for baseURL: String) -> SecKey? {
-        let tag = rsaTag(for: baseURL)
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassKey,
-            kSecAttrKeyType as String: kSecAttrKeyTypeRSA,
-            kSecAttrApplicationTag as String: Data(tag.utf8),
-            kSecReturnRef as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess else { return nil }
-        return result as! SecKey?
-    }
-
-    static func deleteRSAKeyPair(for baseURL: String) {
+    static func deleteLegacyRSAKeyPair(for baseURL: String) {
         let tag = rsaTag(for: baseURL)
         let query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: Data(tag.utf8),
         ]
         SecItemDelete(query as CFDictionary)
-    }
-
-    // MARK: - Export Public Key PEM
-
-    static func exportPublicKeyPEM(from privateKey: SecKey) throws -> String {
-        guard let publicKey = SecKeyCopyPublicKey(privateKey) else {
-            throw KeychainError.publicKeyExportFailed
-        }
-
-        var error: Unmanaged<CFError>?
-        guard let publicKeyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
-            throw error!.takeRetainedValue() as Error
-        }
-
-        // SecKeyCopyExternalRepresentation returns PKCS#1 (RSAPublicKey) format.
-        // Discourse expects PKCS#8 SubjectPublicKeyInfo PEM.
-        // Build proper PKCS#8 wrapper with correct lengths.
-        let bitStringContent = Data([0x00]) + publicKeyData // 0x00 = unused bits prefix
-        let bitString = asn1LengthPrefixed(tag: 0x03, content: bitStringContent)
-
-        let algorithmIdentifier = Data([
-            0x30, 0x0D,
-            0x06, 0x09,
-            0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01,
-            0x05, 0x00,
-        ])
-
-        let sequenceContent = algorithmIdentifier + bitString
-        let pkcs8Data = asn1LengthPrefixed(tag: 0x30, content: sequenceContent)
-
-        let base64 = pkcs8Data.base64EncodedString(options: .lineLength64Characters)
-        return "-----BEGIN PUBLIC KEY-----\n\(base64)\n-----END PUBLIC KEY-----"
-    }
-
-    private static func asn1LengthPrefixed(tag: UInt8, content: Data) -> Data {
-        var result = Data([tag])
-        let length = content.count
-        if length < 0x80 {
-            result.append(UInt8(length))
-        } else if length <= 0xFF {
-            result.append(contentsOf: [0x81, UInt8(length)])
-        } else {
-            result.append(contentsOf: [0x82, UInt8(length >> 8), UInt8(length & 0xFF)])
-        }
-        result.append(content)
-        return result
-    }
-}
-
-// MARK: - Errors
-
-enum KeychainError: Error, LocalizedError {
-    case unhandledError(status: OSStatus)
-    case publicKeyExportFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .unhandledError(let status):
-            return "Keychain error: \(status)"
-        case .publicKeyExportFailed:
-            return "Failed to export public key"
-        }
     }
 }

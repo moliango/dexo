@@ -1,57 +1,77 @@
 import UIKit
 
 final class MessagesViewController: ObservableViewController {
-    private let viewModel: MessagesViewModel
     private let api: DiscourseAPI
+    private let viewModel: MessagesViewModel
     private weak var authGate: AuthGating?
 
-    private lazy var tableView: UITableView = {
-        let tv = ThemedTableView(frame: .zero, style: .plain)
-        tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.register(MessageCell.self, forCellReuseIdentifier: MessageCell.reuseIdentifier)
-        tv.delegate = self
-        tv.dataSource = self
-        return tv
-    }()
-
-    private let activityIndicator: UIActivityIndicatorView = {
-        let ai = UIActivityIndicatorView(style: .medium)
-        ai.hidesWhenStopped = true
-        ai.translatesAutoresizingMaskIntoConstraints = false
-        return ai
-    }()
-
-    private let emptyLabel: UILabel = {
-        let label = UILabel()
-        label.text = String(localized: "messages.empty")
-        label.textColor = .secondaryLabel
-        label.textAlignment = .center
-        label.numberOfLines = 0
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.isHidden = true
-        return label
-    }()
-
-    private lazy var refreshControl: UIRefreshControl = {
-        let rc = UIRefreshControl()
-        rc.addTarget(self, action: #selector(pullToRefresh), for: .valueChanged)
-        return rc
-    }()
-
-    private lazy var filterControl: UISegmentedControl = {
-        let control = UISegmentedControl(items: [
-            String(localized: "messages.filter.inbox"),
-            String(localized: "messages.filter.sent"),
-        ])
-        control.selectedSegmentIndex = 0
-        control.addTarget(self, action: #selector(filterChanged), for: .valueChanged)
+    private let segmentedControl: UISegmentedControl = {
+        let control = UISegmentedControl(items: PrivateMessageFilter.allCases.map(\.title))
+        control.selectedSegmentIndex = PrivateMessageFilter.inbox.rawValue
+        control.translatesAutoresizingMaskIntoConstraints = false
         return control
     }()
 
-    /// Currently selected PM view, derived from the segmented control.
-    private var currentFilter: PrivateMessageFilter {
-        filterControl.selectedSegmentIndex == 1 ? .sent : .inbox
-    }
+    private lazy var tableView: UITableView = {
+        let table = UITableView(frame: .zero, style: .plain)
+        table.translatesAutoresizingMaskIntoConstraints = false
+        table.backgroundColor = .systemGroupedBackground
+        table.separatorStyle = .none
+        table.showsVerticalScrollIndicator = false
+        table.rowHeight = UITableView.automaticDimension
+        table.estimatedRowHeight = TopicCell.estimatedHeight
+        table.register(TopicCell.self, forCellReuseIdentifier: TopicCell.reuseIdentifier)
+        table.dataSource = self
+        table.delegate = self
+        return table
+    }()
+
+    private let stateStackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 14
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
+    private let stateIconView: UIImageView = {
+        let imageView = UIImageView(image: UIImage(systemName: "envelope.fill"))
+        imageView.tintColor = .tertiaryLabel
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+
+    private let stateLabel: UILabel = {
+        let label = UILabel()
+        label.textColor = .secondaryLabel
+        label.textAlignment = .center
+        label.numberOfLines = 0
+        label.font = .systemFont(ofSize: 15)
+        return label
+    }()
+
+    private let stateButton: UIButton = {
+        var config = UIButton.Configuration.filled()
+        config.cornerStyle = .medium
+        let button = UIButton(configuration: config)
+        button.isHidden = true
+        return button
+    }()
+
+    private let loadingIndicator: UIActivityIndicatorView = {
+        let indicator = UIActivityIndicatorView(style: .medium)
+        indicator.hidesWhenStopped = true
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        return indicator
+    }()
+
+    private lazy var refreshControl: UIRefreshControl = {
+        let control = UIRefreshControl()
+        control.addTarget(self, action: #selector(refreshPulled), for: .valueChanged)
+        return control
+    }()
 
     init(api: DiscourseAPI, authGate: AuthGating? = nil) {
         self.api = api
@@ -61,6 +81,7 @@ final class MessagesViewController: ObservableViewController {
         hidesBottomBarWhenPushed = true
     }
 
+    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -68,69 +89,120 @@ final class MessagesViewController: ObservableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "messages.title")
-        navigationItem.titleView = filterControl
-        tableView.refreshControl = refreshControl
-        tableView.tableHeaderView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
+        view.backgroundColor = .systemGroupedBackground
 
+        setupUI()
+        loadMessages()
+    }
+
+    override func updateUI() {
+        segmentedControl.selectedSegmentIndex = viewModel.selectedFilter.rawValue
+
+        if viewModel.isLoading && viewModel.messages.isEmpty {
+            loadingIndicator.startAnimating()
+        } else {
+            loadingIndicator.stopAnimating()
+        }
+        refreshControl.endRefreshing()
+
+        tableView.reloadData()
+        updateState()
+    }
+
+    private func setupUI() {
+        tableView.refreshControl = refreshControl
+        segmentedControl.addTarget(self, action: #selector(filterChanged), for: .valueChanged)
+        stateButton.addTarget(self, action: #selector(stateButtonTapped), for: .touchUpInside)
+
+        stateStackView.addArrangedSubview(stateIconView)
+        stateStackView.addArrangedSubview(stateLabel)
+        stateStackView.addArrangedSubview(stateButton)
+
+        view.addSubview(segmentedControl)
         view.addSubview(tableView)
-        view.addSubview(activityIndicator)
-        view.addSubview(emptyLabel)
+        view.addSubview(stateStackView)
+        view.addSubview(loadingIndicator)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.topAnchor),
+            segmentedControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            segmentedControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            segmentedControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            tableView.topAnchor.constraint(equalTo: segmentedControl.bottomAnchor, constant: 12),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
 
-            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stateStackView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stateStackView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stateStackView.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 32),
+            stateStackView.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
 
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            stateIconView.widthAnchor.constraint(equalToConstant: 48),
+            stateIconView.heightAnchor.constraint(equalToConstant: 48),
+
+            loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
-
-        Task {
-            await viewModel.loadMessages(username: authGate?.currentUsername() ?? "", filter: currentFilter)
-        }
     }
 
-    override func updateUI() {
-        if viewModel.isLoading {
-            activityIndicator.startAnimating()
-        } else {
-            activityIndicator.stopAnimating()
+    private func updateState() {
+        let hasMessages = !viewModel.messages.isEmpty
+        tableView.isHidden = !hasMessages
+        stateStackView.isHidden = hasMessages || viewModel.isLoading
+
+        if viewModel.requiresLogin {
+            stateIconView.image = UIImage(systemName: "person.crop.circle.badge.exclamationmark")
+            stateLabel.text = viewModel.errorMessage ?? String(localized: "login.required.message")
+            stateButton.isHidden = false
+            stateButton.configuration?.title = String(localized: "me.login")
+            return
         }
 
-        if !viewModel.isLoading, viewModel.messages.isEmpty {
-            emptyLabel.isHidden = false
-        } else {
-            emptyLabel.isHidden = true
+        if let error = viewModel.errorMessage {
+            stateIconView.image = UIImage(systemName: "exclamationmark.triangle.fill")
+            stateLabel.text = error
+            stateButton.isHidden = false
+            stateButton.configuration?.title = String(localized: "action.retry")
+            return
         }
 
-        tableView.reloadData()
+        stateIconView.image = UIImage(systemName: "envelope.open.fill")
+        stateLabel.text = String(localized: "messages.empty")
+        stateButton.isHidden = true
     }
 
-    @objc private func pullToRefresh() {
+    private func loadMessages(filter: PrivateMessageFilter? = nil) {
+        guard let username = authGate?.currentUsername(), authGate?.isAuthenticated() == true else {
+            viewModel.requiresLogin = true
+            viewModel.errorMessage = String(localized: "login.required.message")
+            updateUI()
+            return
+        }
         Task {
-            await viewModel.loadMessages(username: authGate?.currentUsername() ?? "", filter: currentFilter)
-            refreshControl.endRefreshing()
+            await viewModel.loadMessages(username: username, filter: filter)
         }
     }
 
     @objc private func filterChanged() {
-        // Clear the current list immediately so the table doesn't show the
-        // previous filter's rows while the new view loads.
-        viewModel.messages = []
-        tableView.reloadData()
-        Task {
-            await viewModel.loadMessages(username: authGate?.currentUsername() ?? "", filter: currentFilter)
+        guard let filter = PrivateMessageFilter(rawValue: segmentedControl.selectedSegmentIndex) else { return }
+        loadMessages(filter: filter)
+    }
+
+    @objc private func refreshPulled() {
+        loadMessages()
+    }
+
+    @objc private func stateButtonTapped() {
+        if viewModel.requiresLogin {
+            authGate?.requireAuth { [weak self] in
+                self?.loadMessages()
+            }
+        } else {
+            loadMessages()
         }
     }
 }
-
-// MARK: - UITableViewDataSource
 
 extension MessagesViewController: UITableViewDataSource {
     func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
@@ -138,24 +210,26 @@ extension MessagesViewController: UITableViewDataSource {
     }
 
     func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        guard let cell = tableView.dequeueReusableCell(withIdentifier: MessageCell.reuseIdentifier, for: indexPath) as? MessageCell else {
+        guard let cell = tableView.dequeueReusableCell(withIdentifier: TopicCell.reuseIdentifier, for: indexPath) as? TopicCell else {
             return UITableViewCell()
         }
         let topic = viewModel.messages[indexPath.row]
-        cell.configure(with: topic, users: viewModel.users, assetBaseURL: api.assetBaseURL, hasUnread: viewModel.hasUnread(topicId: topic.id))
-        cell.accessoryType = .disclosureIndicator
+        cell.configure(
+            with: topic,
+            avatarURL: viewModel.avatarURL(for: topic, baseURL: api.baseURL),
+            categoryName: nil,
+            categoryColor: nil,
+            tags: [String(localized: "messages.private_tag")]
+        )
         return cell
     }
 }
-
-// MARK: - UITableViewDelegate
 
 extension MessagesViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
         let topic = viewModel.messages[indexPath.row]
-        Task { await viewModel.markMessageRead(topicId: topic.id) }
-        let detailVC = TopicDetailViewController(api: api, topicId: topic.id)
-        navigationController?.pushViewController(detailVC, animated: true)
+        let detail = TopicDetailViewController(api: api, topicId: topic.id)
+        navigationController?.pushViewController(detail, animated: true)
     }
 }

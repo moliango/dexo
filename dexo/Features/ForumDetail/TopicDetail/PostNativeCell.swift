@@ -2,336 +2,139 @@ import CookedHTML
 import SDWebImage
 import UIKit
 
-/// Per-post tree rendering metadata. Lives next to the cell because the cell
-/// is the only consumer; populated by the view-model during DFS so that the
-/// cell can draw the proper continuation / corner connectors without having
-/// to walk the tree again at render time.
-struct TreeLineState {
-    /// 0 for the OP, +1 per nesting level.
-    let depth: Int
-    /// True when this post is the last child among its siblings — drives whether
-    /// the column line stops at the avatar's horizontal or continues to the
-    /// bottom of the cell.
-    let isLastSibling: Bool
-    /// Length `max(0, depth - 1)`. `ancestorTrails[i] == true` means the
-    /// ancestor at depth `i + 1` still has siblings below the current row, so a
-    /// vertical line should pass through this cell at that column.
-    let ancestorTrails: [Bool]
-    /// True when this post has any direct replies in the loaded window. Drives
-    /// the visibility of the collapse / expand pill in tree mode.
-    let hasChildren: Bool
-    /// True when the user has toggled this subtree off; descendants are hidden
-    /// elsewhere by the view-model, the cell only needs this to flip the pill
-    /// icon between "−" and "+".
-    let isCollapsed: Bool
-}
-
-/// Custom view that paints the tree-mode connector. Avatars indent per depth
-/// but sit slightly to the right of the line column so the line has a gutter
-/// on the avatar's left — that's where the incoming L-elbow lives. The pill
-/// for cells with children sits on a separate "outgoing" column at one indent
-/// step further right.
-///
-/// OP (depth 0) and column 1 are never drawn — direct replies to OP don't
-/// need a line back to floor 1.
-final class TreeLineView: UIView {
-    var state: TreeLineState? {
-        didSet { setNeedsDisplay() }
-    }
-    /// Y center for the L-elbow — aligned with the avatar's vertical middle.
-    var connectorY: CGFloat = 28 {
-        didSet { setNeedsDisplay() }
-    }
-    /// Y of the avatar's bottom edge; the outgoing column for children begins
-    /// here so visually "the line comes out of the avatar's bottom".
-    var avatarBottomY: CGFloat = 44 {
-        didSet { setNeedsDisplay() }
-    }
-    var lineColor: UIColor = .tertiarySystemFill {
-        didSet { setNeedsDisplay() }
-    }
-    /// Quarter-circle radius for the elbow curve.
-    var cornerRadius: CGFloat = 6 {
-        didSet { setNeedsDisplay() }
-    }
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        backgroundColor = .clear
-        isUserInteractionEnabled = false
-        isOpaque = false
-        contentMode = .redraw
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func draw(_ rect: CGRect) {
-        guard let state else { return }
-        // OP and column-1 contexts produce no visible lines.
-        let drawsIncoming = state.depth >= 2
-        let drawsOutgoing = state.hasChildren && !state.isCollapsed && state.depth >= 1
-        guard drawsIncoming || drawsOutgoing else { return }
-        guard let ctx = UIGraphicsGetCurrentContext() else { return }
-        let cappedDepth = min(state.depth, PostNativeCell.treeMaxIndentLevels)
-        ctx.setStrokeColor(lineColor.cgColor)
-        ctx.setLineWidth(1)
-        ctx.setLineCap(.square)
-
-        if drawsIncoming {
-            // Ancestor trails (skip column 1 → start at i == 1). Walk *every*
-            // ancestor, but clamp each column to the max indent level: past the
-            // cap all levels share one spine column, so a deep descendant row
-            // must still redraw those ancestors' pass-through lines. Capping the
-            // loop by depth (the old behaviour) dropped them, breaking an
-            // ancestor's sibling spine wherever a deeper subtree sat between it
-            // and its next sibling. Columns repeat once clamped — harmless
-            // overdraw of the same vertical.
-            for i in 1 ..< state.ancestorTrails.count where state.ancestorTrails[i] {
-                let x = Self.columnX(forDepth: min(i + 1, PostNativeCell.treeMaxIndentLevels))
-                ctx.move(to: CGPoint(x: x, y: 0))
-                ctx.addLine(to: CGPoint(x: x, y: rect.height))
-            }
-
-            // Own connector at the current depth column.
-            let x = Self.columnX(forDepth: cappedDepth)
-            let stubEndX = x + PostNativeCell.treeIndentStep * 0.5
-            let radius = min(cornerRadius, PostNativeCell.treeIndentStep * 0.5)
-            if state.isLastSibling {
-                // Last child: the spine drops in, rounds the corner, and runs
-                // out to the avatar — nothing continues below.
-                ctx.move(to: CGPoint(x: x, y: 0))
-                ctx.addArc(
-                    tangent1End: CGPoint(x: x, y: connectorY),
-                    tangent2End: CGPoint(x: x + radius, y: connectorY),
-                    radius: radius
-                )
-                ctx.addLine(to: CGPoint(x: stubEndX, y: connectorY))
-            } else {
-                // Non-last child: the spine passes straight through so the
-                // sibling line stays unbroken, and a *curved* branch peels off
-                // it into the avatar. Drawing the full spine first (rather than
-                // routing it through the arc) is what closes the corner gap —
-                // the branch just overlaps the spine at its start point.
-                ctx.move(to: CGPoint(x: x, y: 0))
-                ctx.addLine(to: CGPoint(x: x, y: rect.height))
-                ctx.move(to: CGPoint(x: x, y: connectorY - radius))
-                ctx.addArc(
-                    tangent1End: CGPoint(x: x, y: connectorY),
-                    tangent2End: CGPoint(x: x + radius, y: connectorY),
-                    radius: radius
-                )
-                ctx.addLine(to: CGPoint(x: stubEndX, y: connectorY))
-            }
-        }
-
-        if drawsOutgoing {
-            // Outgoing column for this post's children, starting at the
-            // avatar's bottom so it visually "drops out of" the avatar. The
-            // pill drawn on top by the cell view sits at the midpoint of this
-            // segment.
-            let childCappedDepth = min(state.depth + 1, PostNativeCell.treeMaxIndentLevels)
-            let childX = Self.columnX(forDepth: childCappedDepth)
-            ctx.move(to: CGPoint(x: childX, y: avatarBottomY))
-            ctx.addLine(to: CGPoint(x: childX, y: rect.height))
-        }
-
-        ctx.strokePath()
-    }
-
-    /// Pixel x for the vertical line at a given tree depth's INCOMING side —
-    /// i.e. the avatar.center of the parent at depth (D - 1). Anchoring on the
-    /// parent's avatar.center means every line emerges from the parent
-    /// avatar's bottom-center, which is what users intuitively expect.
-    static func columnX(forDepth depth: Int) -> CGFloat {
-        // 12 (cell leading) + parent avatar.leading shift + 16 (half avatar).
-        let parentIndent = PostNativeCell.treeAvatarIndent(forDepth: depth - 1)
-        return 12 + parentIndent + 16
-    }
-}
-
 final class PostNativeCell: UITableViewCell {
     static let reuseIdentifier = "PostNativeCell"
     static let headerHeight: CGFloat = 44
-    static let bottomBarHeight: CGFloat = 30
-    /// Baseline chrome height wrapping the content stack, for callers that
-    /// precompute `heightForRowAt` instead of going through
-    /// `systemLayoutSizeFitting`. Mirrors the top/bottom constraint constants
-    /// in `setupViews`: 12 (top) + avatar + 12 (gap) on top, 10 + bottomBar +
-    /// 6 + 1 (separator) on bottom.
-    static func chromeHeight() -> CGFloat {
-        let avatarSize = FontManager.shared.scaled(baseAvatarSize)
-        return 24 + avatarSize + 17 + bottomBarHeight
+    static let bottomBarHeight: CGFloat = 36
+    fileprivate static let boostIconImage: UIImage = {
+        let size = CGSize(width: 24, height: 24)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { context in
+            UIColor.black.setFill()
+
+            let leftFin = UIBezierPath()
+            leftFin.move(to: CGPoint(x: 8.2, y: 13.8))
+            leftFin.addLine(to: CGPoint(x: 4.8, y: 18.8))
+            leftFin.addCurve(to: CGPoint(x: 10.1, y: 17.1), controlPoint1: CGPoint(x: 6.7, y: 18.0), controlPoint2: CGPoint(x: 8.5, y: 17.4))
+            leftFin.close()
+            leftFin.fill()
+
+            let rightFin = UIBezierPath()
+            rightFin.move(to: CGPoint(x: 15.8, y: 13.8))
+            rightFin.addLine(to: CGPoint(x: 19.2, y: 18.8))
+            rightFin.addCurve(to: CGPoint(x: 13.9, y: 17.1), controlPoint1: CGPoint(x: 17.3, y: 18.0), controlPoint2: CGPoint(x: 15.5, y: 17.4))
+            rightFin.close()
+            rightFin.fill()
+
+            let body = UIBezierPath()
+            body.move(to: CGPoint(x: 12, y: 2.4))
+            body.addCurve(to: CGPoint(x: 16.7, y: 13.9), controlPoint1: CGPoint(x: 16.0, y: 5.1), controlPoint2: CGPoint(x: 17.4, y: 10.0))
+            body.addCurve(to: CGPoint(x: 12, y: 18.5), controlPoint1: CGPoint(x: 15.5, y: 16.5), controlPoint2: CGPoint(x: 13.9, y: 18.0))
+            body.addCurve(to: CGPoint(x: 7.3, y: 13.9), controlPoint1: CGPoint(x: 10.1, y: 18.0), controlPoint2: CGPoint(x: 8.5, y: 16.5))
+            body.addCurve(to: CGPoint(x: 12, y: 2.4), controlPoint1: CGPoint(x: 6.6, y: 10.0), controlPoint2: CGPoint(x: 8.0, y: 5.1))
+            body.close()
+            body.fill()
+
+            let flame = UIBezierPath()
+            flame.move(to: CGPoint(x: 12, y: 17.5))
+            flame.addCurve(to: CGPoint(x: 14.1, y: 21.2), controlPoint1: CGPoint(x: 13.3, y: 18.6), controlPoint2: CGPoint(x: 14.2, y: 19.8))
+            flame.addCurve(to: CGPoint(x: 12, y: 23.0), controlPoint1: CGPoint(x: 13.8, y: 22.1), controlPoint2: CGPoint(x: 12.9, y: 22.8))
+            flame.addCurve(to: CGPoint(x: 9.9, y: 21.2), controlPoint1: CGPoint(x: 11.1, y: 22.8), controlPoint2: CGPoint(x: 10.2, y: 22.1))
+            flame.addCurve(to: CGPoint(x: 12, y: 17.5), controlPoint1: CGPoint(x: 9.8, y: 19.8), controlPoint2: CGPoint(x: 10.7, y: 18.6))
+            flame.close()
+            flame.fill()
+
+            context.cgContext.setBlendMode(.clear)
+            UIBezierPath(ovalIn: CGRect(x: 9.7, y: 7.0, width: 4.6, height: 4.6)).fill()
+            context.cgContext.setBlendMode(.normal)
+        }
+        return image.withRenderingMode(.alwaysTemplate)
+    }()
+    private static let firstPostPaperBackgroundColor = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.secondarySystemGroupedBackground
+            : UIColor(red: 0.992, green: 0.984, blue: 0.961, alpha: 1)
+    }
+    private static let firstPostPaperBorderColor = UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor.separator.withAlphaComponent(0.28)
+            : UIColor(red: 0.855, green: 0.824, blue: 0.753, alpha: 0.72)
     }
 
-    /// Pixels of avatar leading-indent applied per tree depth. The step is
-    /// wider than the avatar's half-width so the parent's avatar.center line
-    /// column ends up just to the left of the child's avatar, leaving room
-    /// for the L-elbow's horizontal stub.
-    static let treeIndentStep: CGFloat = 22
-    static let treeMaxIndentLevels: Int = 5
-    /// Extra horizontal offset from the avatar's leading edge to where the
-    /// content stack starts in tree mode. Keeps the post body well clear of
-    /// the outgoing column line (at avatar.center) so the body never visually
-    /// touches the spine.
-    static let treeContentExtraShift: CGFloat = 28
-
-    /// Leading offset for the avatar in tree mode. OP (depth 0) and direct
-    /// replies to OP (depth 1) share the same x — the spine doesn't reach
-    /// floor 1, so there's no reason to indent floor-1 avatars.
-    static func treeAvatarIndent(forDepth depth: Int) -> CGFloat {
-        guard depth >= 2 else { return 0 }
-        let cappedSteps = min(depth - 1, treeMaxIndentLevels - 1)
-        return CGFloat(cappedSteps) * treeIndentStep
+    static func firstPostRenderContentWidth(for tableWidth: CGFloat) -> CGFloat {
+        let horizontalInset = (Metrics.cardOuterHorizontal + Metrics.cardInner + Metrics.firstPostContentInset) * 2
+        return max(tableWidth - horizontalInset, 0)
     }
 
-    /// Leading offset for the content stack in tree mode. Equal to the
-    /// avatar's indent plus an extra shift so the body text never overlaps the
-    /// outgoing line column. OP is exempt — it isn't part of the tree.
-    static func treeContentIndent(forDepth depth: Int) -> CGFloat {
-        guard depth >= 1 else { return 0 }
-        return treeAvatarIndent(forDepth: depth) + treeContentExtraShift
+    private enum Metrics {
+        static let cardOuterVertical: CGFloat = 6
+        static let cardOuterHorizontal: CGFloat = 10
+        static let cardInner: CGFloat = 16
+        static let headerTop: CGFloat = 14
+        static let avatarSize: CGFloat = 32
+        static let avatarToText: CGFloat = 8
+        static let contentTop: CGFloat = 10
+        static let firstPostContentInset: CGFloat = 12
+        static let actionTop: CGFloat = 10
+        static let actionButtonWidth: CGFloat = 36
+        static let actionSpacing: CGFloat = 8
+        static let minimumReplyCardHeight: CGFloat = 80
     }
-
-    private static let symbolConfig = UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)
-
-    // Pre-rendered fallback images so the hot configure / prepareForReuse paths
-    // don't re-allocate them on every cell reuse.
-    private static let heartImage = UIImage(systemName: "heart", withConfiguration: symbolConfig)
-    private static let heartFillImage = UIImage(systemName: "heart.fill", withConfiguration: symbolConfig)
-    private static let boostFallbackImage = UIImage(named: "roket.symbols", in: nil, with: symbolConfig)
-
-    /// Horizontal / vertical padding applied to the OP name pill around `nameLabel`.
-    /// Vertical is 0 — the label's intrinsic line height already overshoots
-    /// the rendered glyph height, so any padding makes the pill look taller
-    /// than the avatar's centerline and visually unbalanced.
-    private static let opPillHorizontalPadding: CGFloat = 4
-    private static let opPillVerticalPadding: CGFloat = 0
 
     weak var delegate: PostCellDelegate?
-    private(set) var postId: Int = 0
-    /// Tracks which post's content views are currently rendered in contentStackView.
-    /// Kept separate from `postId` so prepareForReuse can reset metadata without
-    /// forcing a full content rebuild on the next configure call.
-    private var renderedContentPostId: Int = 0
+    private var postId: Int = 0
     private var postLink: String?
     private var currentPost: DiscourseTopicDetail.Post?
+    private var cookedHTML: String = ""
     private var validReactions: [String] = []
+    private var isBookmarked = false
+
+    private let cardView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .secondarySystemGroupedBackground
+        view.layer.cornerRadius = 14
+        view.layer.cornerCurve = .continuous
+        view.layer.borderWidth = 1.0 / UIScreen.main.scale
+        view.layer.borderColor = UIColor.separator.withAlphaComponent(0.35).cgColor
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    private var cardMinHeightConstraint: NSLayoutConstraint?
 
     // MARK: - Header UI
-
-    private static let baseAvatarSize: CGFloat = 32
-    private static let baseFlairSize: CGFloat = 14
-    private var avatarWidthConstraint: NSLayoutConstraint!
-    private var avatarHeightConstraint: NSLayoutConstraint!
-    private var flairWidthConstraint: NSLayoutConstraint!
-    private var flairHeightConstraint: NSLayoutConstraint!
 
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
+        iv.layer.cornerRadius = 16
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
     }()
 
-    private let flairImageView: SDAnimatedImageView = {
-        let iv = SDAnimatedImageView()
+    private let flairImageView: UIImageView = {
+        let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
+        iv.layer.cornerRadius = 7
         iv.layer.borderWidth = 1
         iv.layer.borderColor = UIColor.systemBackground.cgColor
         iv.translatesAutoresizingMaskIntoConstraints = false
         iv.isHidden = true
-        iv.autoPlayAnimatedImage = true
-        // Bound the per-view animation buffer so a 512×512 multi-frame flair
-        // can't pin its full decoded set in RAM. SDAnimatedImage decodes
-        // frames lazily; with a small cap it keeps only the active + a
-        // couple buffered frames and re-decodes the rest on demand. CPU
-        // hit is negligible for a 14pt badge; memory stays bounded
-        // regardless of source resolution.
-        iv.maxBufferSize = 1 * 1024 * 1024
-        // Free the decoded buffer when offscreen / cell is reused.
-        iv.clearBufferWhenStopped = true
         return iv
     }()
 
     private let nameLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 14, weight: .semibold)
+        label.font = .systemFont(ofSize: 14, weight: .semibold)
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
-    /// Pill drawn behind `nameLabel` to mark the OP. Background tinted with the
-    /// active theme accent; hidden for non-OP posts and collapses to zero
-    /// padding so the layout matches the original.
-    private let nameBackgroundView: UIView = {
-        let v = UIView()
-        v.translatesAutoresizingMaskIntoConstraints = false
-        v.layer.cornerRadius = 3
-        v.layer.cornerCurve = .continuous
-        v.isHidden = true
-        return v
-    }()
-
-    private var nameBgLeading: NSLayoutConstraint!
-    private var nameBgTrailing: NSLayoutConstraint!
-    private var nameBgTop: NSLayoutConstraint!
-    private var nameBgBottom: NSLayoutConstraint!
-    private var usernameLabelTop: NSLayoutConstraint!
-
-    /// Leading anchors that shift right when rendering as a tree-mode reply.
-    /// Their base `constant` (12pt for avatar / content / 16pt for the bottom
-    /// bar) is preserved; configure adds the per-depth indent on top.
-    private var avatarLeading: NSLayoutConstraint!
-    private var contentStackLeading: NSLayoutConstraint!
-    private var bottomLeftStackLeading: NSLayoutConstraint!
-
-    /// Two pairs of constraints that govern where the time + reply badge land
-    /// when the floor label is hidden in tree mode. In flat mode the floor
-    /// sits at the top row with the reply badge alongside, and the time is
-    /// the row below. In tree mode the floor is gone, so the reply badge
-    /// takes its row at the top and time drops below — preserving the
-    /// vertical stacking instead of squishing them onto the same row.
-    private var timeLabelTopFlat: NSLayoutConstraint!
-    private var timeLabelTopTree: NSLayoutConstraint!
-    private var replyToCenterYFlat: NSLayoutConstraint!
-    private var replyToTopTree: NSLayoutConstraint!
-
-    /// Branch / corner connector overlay shown only in tree mode. Hidden + has
-    /// no state when the cell is rendering a flat-mode post so the existing
-    /// layout stays pixel-identical to before this feature.
-    private let treeLineView: TreeLineView = {
-        let v = TreeLineView()
-        v.translatesAutoresizingMaskIntoConstraints = false
-        v.isHidden = true
-        return v
-    }()
-
-    /// Circle pill that sits on the children's column line and toggles the
-    /// subtree visibility. Only shown in tree mode for posts that actually
-    /// have replies in the loaded window.
-    private let collapseButton: UIButton = {
-        let b = UIButton(type: .system)
-        b.translatesAutoresizingMaskIntoConstraints = false
-        b.backgroundColor = .systemBackground
-        b.layer.cornerRadius = 9
-        b.layer.borderWidth = 1
-        b.tintColor = .secondaryLabel
-        b.isHidden = true
-        let cfg = UIImage.SymbolConfiguration(pointSize: 9, weight: .bold)
-        b.setPreferredSymbolConfiguration(cfg, forImageIn: .normal)
-        b.accessibilityLabel = String(localized: "topic_detail.collapse")
-        return b
-    }()
-
-    private var collapseLeading: NSLayoutConstraint!
-
     private let usernameLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 12)
+        label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -339,7 +142,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let userTitleLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 12)
+        label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
@@ -348,7 +151,7 @@ final class PostNativeCell: UITableViewCell {
 
     private let timeLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 12)
+        label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -356,38 +159,58 @@ final class PostNativeCell: UITableViewCell {
 
     private let floorLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.monospacedDigitFont(size: 12)
+        label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
 
+    private let sourceButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        button.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.isHidden = true
+        button.translatesAutoresizingMaskIntoConstraints = false
+        return button
+    }()
 
     private let replyToLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 12)
+        label.font = .systemFont(ofSize: 12)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         label.isHidden = true
-        label.isUserInteractionEnabled = true
         return label
     }()
 
     // MARK: - Content
 
+    private let contentCardView: UIView = {
+        let view = UIView()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.layer.cornerRadius = 18
+        view.layer.cornerCurve = .continuous
+        return view
+    }()
+
     private let contentStackView: UIStackView = {
         let sv = UIStackView()
         sv.axis = .vertical
-        sv.spacing = NativeContentRenderer.contentStackSpacing
+        sv.spacing = 8
         sv.translatesAutoresizingMaskIntoConstraints = false
         return sv
     }()
+    private var contentStackTopConstraint: NSLayoutConstraint?
+    private var contentStackLeadingConstraint: NSLayoutConstraint?
+    private var contentStackTrailingConstraint: NSLayoutConstraint?
+    private var contentStackBottomConstraint: NSLayoutConstraint?
 
     // MARK: - Bottom Bar
 
     private let showRepliesButton: UIButton = {
         let button = UIButton(type: .system)
-        button.titleLabel?.font = FontManager.shared.font(size: 12, weight: .medium)
+        button.titleLabel?.font = .systemFont(ofSize: 12, weight: .medium)
         button.tintColor = .secondaryLabel
         button.contentHorizontalAlignment = .leading
         button.isHidden = true
@@ -417,10 +240,30 @@ final class PostNativeCell: UITableViewCell {
 
     private let reactionCountLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 12)
+        label.font = .systemFont(ofSize: 12, weight: .semibold)
         label.textColor = .secondaryLabel
         return label
     }()
+
+    private let reactionPillControl: UIControl = {
+        let control = UIControl()
+        control.backgroundColor = .clear
+        control.layer.cornerRadius = PostNativeCell.bottomBarHeight / 2
+        control.layer.cornerCurve = .continuous
+        control.translatesAutoresizingMaskIntoConstraints = false
+        return control
+    }()
+
+    private let reactionPillStack: UIStackView = {
+        let sv = UIStackView()
+        sv.axis = .horizontal
+        sv.spacing = 4
+        sv.alignment = .center
+        sv.isUserInteractionEnabled = false
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        return sv
+    }()
+    private var reactionPillWidthConstraint: NSLayoutConstraint?
 
     private let bottomLeftStack: UIStackView = {
         let sv = UIStackView()
@@ -431,48 +274,56 @@ final class PostNativeCell: UITableViewCell {
         return sv
     }()
 
+    private let actionStackView: UIStackView = {
+        let sv = UIStackView()
+        sv.axis = .horizontal
+        sv.spacing = Metrics.actionSpacing
+        sv.alignment = .center
+        sv.translatesAutoresizingMaskIntoConstraints = false
+        sv.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return sv
+    }()
+
     private let reactButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = PostNativeCell.symbolConfig
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         button.setImage(UIImage(systemName: "heart", withConfiguration: config), for: .normal)
-        button.titleLabel?.font = FontManager.shared.monospacedDigitFont(size: 11, weight: .medium)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
 
-    /// Overlay shown on top of the heart symbol when the user has a current
-    /// reaction. Constrained to a fixed size so a large source emoji image
-    /// can't bloat the button frame and shove sibling buttons (boost) around.
-    private let userReactionImageView: UIImageView = {
-        let iv = UIImageView()
-        iv.contentMode = .scaleAspectFit
-        iv.translatesAutoresizingMaskIntoConstraints = false
-        iv.isUserInteractionEnabled = false
-        iv.isHidden = true
-        return iv
-    }()
-
     private let boostButton: UIButton = {
         let button = UIButton(type: .system)
-        button.titleLabel?.font = FontManager.shared.monospacedDigitFont(size: 11, weight: .medium)
+        button.setImage(PostNativeCell.boostIconImage, for: .normal)
+        button.tintColor = .tertiaryLabel
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.accessibilityLabel = String(localized: "post.boost")
+        return button
+    }()
+
+    private let bookmarkButton: UIButton = {
+        let button = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        button.setImage(UIImage(systemName: "bookmark", withConfiguration: config), for: .normal)
+        button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
 
     private let moreButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = PostNativeCell.symbolConfig
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         button.setImage(UIImage(systemName: "ellipsis", withConfiguration: config), for: .normal)
         button.tintColor = .tertiaryLabel
-        button.translatesAutoresizingMaskIntoConstraints = false
         button.showsMenuAsPrimaryAction = true
+        button.translatesAutoresizingMaskIntoConstraints = false
         return button
     }()
 
     private let replyButton: UIButton = {
         let button = UIButton(type: .system)
-        let config = PostNativeCell.symbolConfig
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
         button.setImage(UIImage(systemName: "arrowshape.turn.up.left", withConfiguration: config), for: .normal)
         button.tintColor = .tertiaryLabel
         button.translatesAutoresizingMaskIntoConstraints = false
@@ -489,6 +340,8 @@ final class PostNativeCell: UITableViewCell {
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
         selectionStyle = .none
+        backgroundColor = .clear
+        contentView.backgroundColor = .clear
         setupViews()
     }
 
@@ -497,34 +350,19 @@ final class PostNativeCell: UITableViewCell {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func layoutSubviews() {
-        let t0 = CACurrentMediaTime()
-        super.layoutSubviews()
-        let ms = (CACurrentMediaTime() - t0) * 1000
-        if ms > 3 { FrameDropDetector.shared.log("layoutSubviews post#\(postId) \(String(format: "%.1f", ms))ms") }
-    }
-
-    override func systemLayoutSizeFitting(_ targetSize: CGSize, withHorizontalFittingPriority horizontalFittingPriority: UILayoutPriority, verticalFittingPriority: UILayoutPriority) -> CGSize {
-        let t0 = CACurrentMediaTime()
-        let size = super.systemLayoutSizeFitting(targetSize, withHorizontalFittingPriority: horizontalFittingPriority, verticalFittingPriority: verticalFittingPriority)
-        let ms = (CACurrentMediaTime() - t0) * 1000
-        if ms > 1 { debugLog("sizeFitting post#\(postId) \(String(format: "%.1f", ms))ms → h=\(String(format: "%.0f", size.height))") }
-        return size
-    }
-
     private func setupViews() {
-        contentView.addSubview(treeLineView)
-        contentView.addSubview(collapseButton)
-        contentView.addSubview(avatarImageView)
-        contentView.addSubview(flairImageView)
-        contentView.addSubview(nameBackgroundView)
-        contentView.addSubview(nameLabel)
-        contentView.addSubview(usernameLabel)
-        contentView.addSubview(userTitleLabel)
-        contentView.addSubview(timeLabel)
-        contentView.addSubview(floorLabel)
-        contentView.addSubview(replyToLabel)
-        contentView.addSubview(contentStackView)
+        contentView.addSubview(cardView)
+        cardView.addSubview(avatarImageView)
+        cardView.addSubview(flairImageView)
+        cardView.addSubview(nameLabel)
+        cardView.addSubview(usernameLabel)
+        cardView.addSubview(userTitleLabel)
+        cardView.addSubview(timeLabel)
+        cardView.addSubview(floorLabel)
+        cardView.addSubview(sourceButton)
+        cardView.addSubview(replyToLabel)
+        cardView.addSubview(contentCardView)
+        contentCardView.addSubview(contentStackView)
         bottomLeftStack.addArrangedSubview(showRepliesButton)
         for iv in reactionImageViews {
             reactionStackView.addArrangedSubview(iv)
@@ -532,303 +370,155 @@ final class PostNativeCell: UITableViewCell {
         }
         reactionStackView.addArrangedSubview(reactionCountLabel)
         reactionCountLabel.isHidden = true
-        bottomLeftStack.addArrangedSubview(reactionStackView)
-        contentView.addSubview(bottomLeftStack)
-        contentView.addSubview(reactButton)
-        reactButton.addSubview(userReactionImageView)
-        contentView.addSubview(boostButton)
-        contentView.addSubview(moreButton)
-        contentView.addSubview(replyButton)
-        contentView.addSubview(separatorLine)
+        reactionPillStack.addArrangedSubview(reactionStackView)
+        reactionPillStack.addArrangedSubview(reactButton)
+        reactionPillControl.addSubview(reactionPillStack)
+        actionStackView.addArrangedSubview(reactionPillControl)
+        actionStackView.addArrangedSubview(boostButton)
+        actionStackView.addArrangedSubview(bookmarkButton)
+        actionStackView.addArrangedSubview(replyButton)
+        actionStackView.addArrangedSubview(moreButton)
+        cardView.addSubview(bottomLeftStack)
+        cardView.addSubview(actionStackView)
+        cardView.addSubview(separatorLine)
 
-        replyButton.accessibilityLabel = String(localized: "reply.title")
-        moreButton.accessibilityLabel = String(localized: "action.more")
-        reactButton.accessibilityLabel = String(localized: "post.a11y.like")
-        boostButton.accessibilityLabel = String(localized: "post.a11y.boost")
-
-        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
-        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
-        flairWidthConstraint = flairImageView.widthAnchor.constraint(equalToConstant: Self.baseFlairSize)
-        flairHeightConstraint = flairImageView.heightAnchor.constraint(equalToConstant: Self.baseFlairSize)
-
-        // Pill's outer edges hug the avatar gap; nameLabel sits inside via these
-        // constraints whose `constant` is toggled in `configure` between 0 and
-        // the OP padding amount. Keeping the pill (not the text) anchored to
-        // `avatar+8` means the visual gutter from avatar to the cell content
-        // doesn't shift when the OP marker turns on/off.
-        nameBgLeading = nameLabel.leadingAnchor.constraint(equalTo: nameBackgroundView.leadingAnchor)
-        nameBgTrailing = nameBackgroundView.trailingAnchor.constraint(equalTo: nameLabel.trailingAnchor)
-        nameBgTop = nameLabel.topAnchor.constraint(equalTo: nameBackgroundView.topAnchor)
-        nameBgBottom = nameBackgroundView.bottomAnchor.constraint(equalTo: nameLabel.bottomAnchor)
+        let contentTopConstraint = contentStackView.topAnchor.constraint(equalTo: contentCardView.topAnchor)
+        let contentLeadingConstraint = contentStackView.leadingAnchor.constraint(equalTo: contentCardView.leadingAnchor)
+        let contentTrailingConstraint = contentStackView.trailingAnchor.constraint(equalTo: contentCardView.trailingAnchor)
+        let contentBottomConstraint = contentStackView.bottomAnchor.constraint(equalTo: contentCardView.bottomAnchor)
+        contentStackTopConstraint = contentTopConstraint
+        contentStackLeadingConstraint = contentLeadingConstraint
+        contentStackTrailingConstraint = contentTrailingConstraint
+        contentStackBottomConstraint = contentBottomConstraint
+        let reactionPillWidthConstraint = reactionPillControl.widthAnchor.constraint(equalToConstant: 48)
+        self.reactionPillWidthConstraint = reactionPillWidthConstraint
 
         NSLayoutConstraint.activate([
-            nameBgLeading, nameBgTrailing, nameBgTop, nameBgBottom,
-        ])
+            cardView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Metrics.cardOuterVertical),
+            cardView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Metrics.cardOuterHorizontal),
+            cardView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Metrics.cardOuterHorizontal),
+            cardView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Metrics.cardOuterVertical),
 
-        avatarLeading = avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
-        contentStackLeading = contentStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
-        bottomLeftStackLeading = bottomLeftStack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16)
-
-        // Pair A (flat): time + reply badge sit relative to the floor label.
-        // Pair B (tree): floor is hidden, so the reply badge takes the top
-        // row and the time stacks below it — keep them vertically separated.
-        timeLabelTopFlat = timeLabel.topAnchor.constraint(equalTo: floorLabel.bottomAnchor, constant: 2)
-        timeLabelTopTree = timeLabel.topAnchor.constraint(equalTo: replyToLabel.bottomAnchor, constant: 2)
-        replyToCenterYFlat = replyToLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor)
-        replyToTopTree = replyToLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14)
-        // Default to flat — `configure` swaps to the tree pair when in tree mode.
-        NSLayoutConstraint.activate([timeLabelTopFlat, replyToCenterYFlat])
-
-        // Collapse pill centerX is updated per-cell in `configure`; we anchor
-        // the leading edge so a single stored constraint moves it horizontally
-        // without rebuilding constraints each reuse.
-        collapseLeading = collapseButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 0)
-
-        NSLayoutConstraint.activate([
-            treeLineView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            treeLineView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            treeLineView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            treeLineView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-
-            collapseButton.widthAnchor.constraint(equalToConstant: 18),
-            collapseButton.heightAnchor.constraint(equalToConstant: 18),
-            collapseLeading,
-            // Pill sits just inside the cell's bottom edge so it falls
-            // immediately above the next (child) cell's avatar, on the line
-            // about to enter that avatar.
-            collapseButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -4),
-
-            avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            avatarLeading,
-            avatarWidthConstraint,
-            avatarHeightConstraint,
+            avatarImageView.topAnchor.constraint(equalTo: cardView.topAnchor, constant: Metrics.headerTop),
+            avatarImageView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: Metrics.cardInner),
+            avatarImageView.widthAnchor.constraint(equalToConstant: Metrics.avatarSize),
+            avatarImageView.heightAnchor.constraint(equalToConstant: Metrics.avatarSize),
 
             flairImageView.bottomAnchor.constraint(equalTo: avatarImageView.bottomAnchor, constant: 2),
             flairImageView.trailingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 2),
-            flairWidthConstraint,
-            flairHeightConstraint,
+            flairImageView.widthAnchor.constraint(equalToConstant: 14),
+            flairImageView.heightAnchor.constraint(equalToConstant: 14),
 
-            nameLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            nameBackgroundView.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
+            nameLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: Metrics.headerTop),
+            nameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: Metrics.avatarToText),
 
-            { usernameLabelTop = usernameLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor); return usernameLabelTop }(),
-            usernameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 8),
+            usernameLabel.topAnchor.constraint(equalTo: nameLabel.bottomAnchor),
+            usernameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: Metrics.avatarToText),
 
             userTitleLabel.lastBaselineAnchor.constraint(equalTo: nameLabel.lastBaselineAnchor),
-            userTitleLabel.leadingAnchor.constraint(equalTo: nameBackgroundView.trailingAnchor, constant: 4),
+            userTitleLabel.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 4),
             userTitleLabel.trailingAnchor.constraint(lessThanOrEqualTo: replyToLabel.leadingAnchor, constant: -8),
 
+            replyToLabel.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
             replyToLabel.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -8),
 
-            floorLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
-            floorLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            sourceButton.centerYAnchor.constraint(equalTo: floorLabel.centerYAnchor),
+            sourceButton.trailingAnchor.constraint(equalTo: floorLabel.leadingAnchor, constant: -6),
+            sourceButton.widthAnchor.constraint(equalToConstant: 24),
+            sourceButton.heightAnchor.constraint(equalToConstant: 24),
 
-            timeLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            floorLabel.topAnchor.constraint(equalTo: cardView.topAnchor, constant: Metrics.headerTop),
+            floorLabel.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -Metrics.cardInner),
 
-            contentStackView.topAnchor.constraint(equalTo: avatarImageView.bottomAnchor, constant: 12),
-            contentStackLeading,
-            contentStackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            timeLabel.topAnchor.constraint(equalTo: floorLabel.bottomAnchor, constant: 2),
+            timeLabel.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -Metrics.cardInner),
 
-            bottomLeftStack.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            bottomLeftStackLeading,
+            contentCardView.topAnchor.constraint(equalTo: avatarImageView.bottomAnchor, constant: Metrics.contentTop),
+            contentCardView.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: Metrics.cardInner),
+            contentCardView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -Metrics.cardInner),
+            contentTopConstraint,
+            contentLeadingConstraint,
+            contentTrailingConstraint,
+            contentBottomConstraint,
+
+            bottomLeftStack.topAnchor.constraint(equalTo: contentCardView.bottomAnchor, constant: Metrics.actionTop),
+            bottomLeftStack.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: Metrics.cardInner),
+            bottomLeftStack.trailingAnchor.constraint(lessThanOrEqualTo: actionStackView.leadingAnchor, constant: -12),
             bottomLeftStack.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
 
-            moreButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            moreButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            moreButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            moreButton.widthAnchor.constraint(equalToConstant: 36),
-            { let c = moreButton.bottomAnchor.constraint(equalTo: separatorLine.topAnchor, constant: -6); c.priority = .init(999); return c }(),
+            actionStackView.topAnchor.constraint(equalTo: contentCardView.bottomAnchor, constant: Metrics.actionTop),
+            actionStackView.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -Metrics.cardInner),
+            actionStackView.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            { let c = actionStackView.bottomAnchor.constraint(equalTo: separatorLine.topAnchor, constant: -8); c.priority = .init(999); return c }(),
 
-            replyButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            replyButton.trailingAnchor.constraint(equalTo: moreButton.leadingAnchor, constant: -4),
-            replyButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            replyButton.widthAnchor.constraint(equalToConstant: 36),
+            reactionPillStack.centerYAnchor.constraint(equalTo: reactionPillControl.centerYAnchor),
+            reactionPillStack.leadingAnchor.constraint(equalTo: reactionPillControl.leadingAnchor, constant: 8),
+            reactionPillStack.trailingAnchor.constraint(equalTo: reactionPillControl.trailingAnchor, constant: -4),
+            reactionPillControl.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            reactionPillWidthConstraint,
 
-            // Order (right→left): more, reply, react, boost. Keeping react
-            // directly left of reply means a hidden boost button (posts that
-            // don't support boost) leaves its gap on the far left where the
-            // flexible space absorbs it — like and reply stay adjacent.
-            reactButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            reactButton.trailingAnchor.constraint(equalTo: replyButton.leadingAnchor, constant: -4),
             reactButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            reactButton.widthAnchor.constraint(equalToConstant: 36),
-
-            userReactionImageView.widthAnchor.constraint(equalToConstant: 18),
-            userReactionImageView.heightAnchor.constraint(equalToConstant: 18),
-            userReactionImageView.centerYAnchor.constraint(equalTo: reactButton.centerYAnchor),
-            // Centered like the heart symbol so the swap looks in-place.
-            userReactionImageView.centerXAnchor.constraint(equalTo: reactButton.centerXAnchor),
-
-            boostButton.topAnchor.constraint(equalTo: contentStackView.bottomAnchor, constant: 10),
-            boostButton.trailingAnchor.constraint(equalTo: reactButton.leadingAnchor, constant: -4),
+            reactButton.widthAnchor.constraint(equalToConstant: Metrics.actionButtonWidth),
             boostButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
-            boostButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 36),
+            boostButton.widthAnchor.constraint(equalToConstant: Metrics.actionButtonWidth),
+            bookmarkButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            bookmarkButton.widthAnchor.constraint(equalToConstant: Metrics.actionButtonWidth),
+            replyButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            replyButton.widthAnchor.constraint(equalToConstant: Metrics.actionButtonWidth),
+            moreButton.heightAnchor.constraint(equalToConstant: Self.bottomBarHeight),
+            moreButton.widthAnchor.constraint(equalToConstant: Metrics.actionButtonWidth),
 
-            separatorLine.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            separatorLine.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            separatorLine.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            separatorLine.leadingAnchor.constraint(equalTo: cardView.leadingAnchor, constant: Metrics.cardInner),
+            separatorLine.trailingAnchor.constraint(equalTo: cardView.trailingAnchor, constant: -Metrics.cardInner),
+            separatorLine.bottomAnchor.constraint(equalTo: cardView.bottomAnchor),
             separatorLine.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
         ])
+        cardMinHeightConstraint = cardView.heightAnchor.constraint(greaterThanOrEqualToConstant: Metrics.minimumReplyCardHeight)
+        cardMinHeightConstraint?.isActive = true
 
         showRepliesButton.addTarget(self, action: #selector(repliesButtonTapped), for: .touchUpInside)
-        collapseButton.addTarget(self, action: #selector(collapseButtonTapped), for: .touchUpInside)
         replyButton.addTarget(self, action: #selector(replyButtonTapped), for: .touchUpInside)
         reactButton.addTarget(self, action: #selector(reactButtonTapped), for: .touchUpInside)
-        let reactLongPress = UILongPressGestureRecognizer(target: self, action: #selector(reactButtonLongPressed(_:)))
-        reactButton.addGestureRecognizer(reactLongPress)
+        reactionPillControl.addTarget(self, action: #selector(reactButtonTapped), for: .touchUpInside)
         boostButton.addTarget(self, action: #selector(boostButtonTapped), for: .touchUpInside)
-        let longPress = UILongPressGestureRecognizer(target: self, action: #selector(boostButtonLongPressed(_:)))
-        boostButton.addGestureRecognizer(longPress)
+        sourceButton.addTarget(self, action: #selector(sourceButtonTapped), for: .touchUpInside)
+        bookmarkButton.addTarget(self, action: #selector(bookmarkButtonTapped), for: .touchUpInside)
+
+        let reactionLongPress = UILongPressGestureRecognizer(target: self, action: #selector(reactionPillLongPressed(_:)))
+        reactionLongPress.minimumPressDuration = 0.35
+        reactionPillControl.addGestureRecognizer(reactionLongPress)
 
         avatarImageView.isUserInteractionEnabled = true
         let avatarTap = UITapGestureRecognizer(target: self, action: #selector(avatarTapped))
         avatarImageView.addGestureRecognizer(avatarTap)
-
-        let replyRefTap = UITapGestureRecognizer(target: self, action: #selector(replyReferenceTapped))
-        replyToLabel.addGestureRecognizer(replyRefTap)
-
-        let cellLongPress = UILongPressGestureRecognizer(target: self, action: #selector(cellLongPressed(_:)))
-        contentView.addGestureRecognizer(cellLongPress)
-    }
-
-    /// The current content block views in the stack, for VC-level caching.
-    var currentContentViews: [UIView] {
-        contentStackView.arrangedSubviews
-    }
-
-    /// Force the next `configure(...)` call to skip the Tier 1 / Tier 2 reuse paths
-    /// and rebuild the content stack from scratch. Needed when the underlying post
-    /// data has changed in a way that stateful renderers (poll, details) hold
-    /// internally and won't pick up via simple reparenting.
-    func markContentDirty() {
-        renderedContentPostId = 0
     }
 
     func configure(
         with post: DiscourseTopicDetail.Post,
         annotatedBlocks: [AnnotatedBlock],
-        cachedContentViews: [UIView]?,
         config: NativeRenderConfig,
         delegate: PostCellDelegate?,
         floorNumber: Int,
         postLink: String?,
         baseURL: String,
-        assetBaseURL: String,
+        hasUnsupportedBlocks: Bool,
+        cookedHTML: String,
         validReactions: [String],
-        isBoostsExpanded: Bool,
-        showsSeparator: Bool,
-        precomputedBlockHeights: [CGFloat?]? = nil,
-        hidesLikeButton: Bool = false,
-        isOP: Bool = false,
-        treeDepth: Int = 0,
-        treeLineState: TreeLineState? = nil,
     ) {
-        let fm = FontManager.shared
-        let avatarSize = fm.scaled(Self.baseAvatarSize)
-        avatarWidthConstraint.constant = avatarSize
-        avatarHeightConstraint.constant = avatarSize
-        avatarImageView.layer.cornerRadius = avatarSize / 2
-        let flairSize = fm.scaled(Self.baseFlairSize)
-        flairWidthConstraint.constant = flairSize
-        flairHeightConstraint.constant = flairSize
-        flairImageView.layer.cornerRadius = flairSize / 2
-
-        // OP and depth-1 share the avatar x (depth-1 doesn't shift), while
-        // depth-2+ steps right by `treeIndentStep` per level. Content is
-        // pushed past the avatar so its body never overlaps the outgoing
-        // column line drawn at the avatar's center.
-        let avatarIndent = Self.treeAvatarIndent(forDepth: treeDepth)
-        let contentIndent = Self.treeContentIndent(forDepth: treeDepth)
-        avatarLeading.constant = 12 + avatarIndent
-        contentStackLeading.constant = 12 + contentIndent
-        // In tree mode, align the reactions/bottom-left row with the content
-        // body's leading edge instead of the avatar's column.
-        let defaultBottomLeading: CGFloat = treeLineState != nil ? (12 + contentIndent) : 16
-        bottomLeftStackLeading.constant = defaultBottomLeading
-
-        if let treeLineState {
-            let drawsIncoming = treeLineState.depth >= 2
-            let drawsOutgoing = treeLineState.hasChildren && !treeLineState.isCollapsed && treeLineState.depth >= 1
-            treeLineView.isHidden = !(drawsIncoming || drawsOutgoing)
-            treeLineView.state = treeLineState
-            treeLineView.connectorY = 12 + avatarSize / 2
-            treeLineView.avatarBottomY = 12 + avatarSize
-            treeLineView.lineColor = .separator
-            treeLineView.tintColor = .separator
-
-            if treeLineState.hasChildren, treeLineState.depth >= 1 {
-                collapseButton.isHidden = false
-                let cappedChildDepth = min(treeLineState.depth + 1, Self.treeMaxIndentLevels)
-                let childColumnX = TreeLineView.columnX(forDepth: cappedChildDepth)
-                // Pill is 18pt wide; center it on the children's column.
-                collapseLeading.constant = childColumnX - 9
-                // Push the bottom action stack right so reactions / badges
-                // don't collide with the pill's children column.
-                bottomLeftStackLeading.constant = max(defaultBottomLeading, childColumnX + 9 + 6)
-                let glyph = treeLineState.isCollapsed ? "plus" : "minus"
-                collapseButton.setImage(UIImage(systemName: glyph), for: .normal)
-                collapseButton.layer.borderColor = UIColor.separator.cgColor
-                collapseButton.accessibilityLabel = treeLineState.isCollapsed
-                    ? String(localized: "topic_detail.expand")
-                    : String(localized: "topic_detail.collapse")
-                collapseButton.backgroundColor = ThemeManager.shared.backgroundColor
-            } else {
-                collapseButton.isHidden = true
-            }
-        } else {
-            treeLineView.isHidden = true
-            treeLineView.state = nil
-            collapseButton.isHidden = true
-        }
-
         postId = post.id
         self.postLink = postLink
         currentPost = post
         self.delegate = delegate
+        self.cookedHTML = cookedHTML
         self.validReactions = validReactions
-        separatorLine.isHidden = !showsSeparator
+        isBookmarked = post.bookmarked
+        sourceButton.isHidden = !hasUnsupportedBlocks
+        applyCardStyle(isFirstPost: floorNumber == 1)
 
-        nameLabel.attributedText = nil
-        if isOP {
-            let accent = ThemeManager.shared.accentColor
-            nameLabel.text = post.name ?? post.username
-            nameLabel.textColor = .white
-            nameBackgroundView.isHidden = false
-            nameBackgroundView.backgroundColor = accent
-            nameBgLeading.constant = Self.opPillHorizontalPadding
-            nameBgTrailing.constant = Self.opPillHorizontalPadding
-            nameBgTop.constant = Self.opPillVerticalPadding
-            nameBgBottom.constant = Self.opPillVerticalPadding
-            usernameLabelTop.constant = Self.opPillVerticalPadding
-        } else {
-            nameLabel.text = post.name
-            nameLabel.textColor = .label
-            nameBackgroundView.isHidden = true
-            nameBackgroundView.backgroundColor = nil
-            nameBgLeading.constant = 0
-            nameBgTrailing.constant = 0
-            nameBgTop.constant = 0
-            nameBgBottom.constant = 0
-            usernameLabelTop.constant = 0
-        }
+        nameLabel.text = post.name
         usernameLabel.text = post.username
         timeLabel.text = Self.formatDate(post.createdAt)
-        // Tree mode reorders posts away from the canonical floor order, so the
-        // floor number ("#42") would be confusing — hide it. Flat mode keeps
-        // it visible as before.
-        let inTreeModeForFloor = treeLineState != nil
-        floorLabel.isHidden = inTreeModeForFloor
-        floorLabel.text = inTreeModeForFloor ? nil : "#\(floorNumber)"
-        // With the floor gone, the reply badge takes its row at the top and
-        // the time drops below — same vertical stack flat mode had, just one
-        // row shorter.
-        if inTreeModeForFloor {
-            NSLayoutConstraint.deactivate([timeLabelTopFlat, replyToCenterYFlat])
-            NSLayoutConstraint.activate([timeLabelTopTree, replyToTopTree])
-        } else {
-            NSLayoutConstraint.deactivate([timeLabelTopTree, replyToTopTree])
-            NSLayoutConstraint.activate([timeLabelTopFlat, replyToCenterYFlat])
-        }
+        floorLabel.text = "#\(floorNumber)"
 
         // User title
         if let userTitle = post.userTitle, !userTitle.isEmpty {
@@ -838,28 +528,19 @@ final class PostNativeCell: UITableViewCell {
             userTitleLabel.isHidden = true
         }
 
-        // Flair badge — animated when the source is GIF / WebP. We let
-        // SDWebImage do its native multi-frame decode (no
-        // `imageThumbnailPixelSize`, which collapses animated decodes to a
-        // single frame in this version). Memory is bounded at the view
-        // level via `maxBufferSize` + `clearBufferWhenStopped` on the
-        // SDAnimatedImageView declaration above — the source GIF stays in
-        // `avatarCache` (~few MiB) but the decoded-frame working set per
-        // cell is capped to ~1 MiB regardless of source resolution.
+        // Flair badge
         if let flairUrl = post.flairUrl, !flairUrl.isEmpty {
             let urlString = flairUrl.hasPrefix("http") ? flairUrl : baseURL + flairUrl
             if let url = URL(string: urlString) {
                 if let bgColor = post.flairBgColor, !bgColor.isEmpty {
                     flairImageView.backgroundColor = UIColor(hex: bgColor)
                 }
-                flairImageView.sd_setImage(with: url, context: ImageCacheManager.shared.avatarContext)
+                flairImageView.sd_setImage(with: url)
                 flairImageView.isHidden = false
             }
         }
 
-        // Tree mode already draws parent/child connector lines, so the reply
-        // badge is redundant — hide it.
-        if let replyUser = post.replyToUser, !inTreeModeForFloor {
+        if let replyUser = post.replyToUser {
             let attachment = NSTextAttachment()
             let symbolConfig = UIImage.SymbolConfiguration(pointSize: 10, weight: .medium)
             attachment.image = UIImage(systemName: "arrowshape.turn.up.left.fill", withConfiguration: symbolConfig)?.withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
@@ -868,202 +549,111 @@ final class PostNativeCell: UITableViewCell {
             replyToLabel.attributedText = attrStr
             replyToLabel.isHidden = false
         } else {
-            replyToLabel.attributedText = nil
             replyToLabel.isHidden = true
         }
 
         let hasReplies = post.replyCount > 0
-        // In tree mode the collapse pill sits in this same column at the
-        // action-row level — hide the modal "N replies" button to avoid the
-        // two affordances stacking on top of each other.
-        let inTreeMode = treeLineState != nil
-        showRepliesButton.isHidden = !hasReplies || inTreeMode
-        if hasReplies, !inTreeMode {
-            showRepliesButton.setTitle(String(localized: "post.replies \(post.replyCount)"), for: .normal)
+        showRepliesButton.isHidden = !hasReplies
+        if hasReplies {
+            configureRepliesButton(count: post.replyCount)
         }
 
         // Reactions
         configureReactions(post.reactions, count: post.reactionUsersCount, baseURL: baseURL)
+        configureReactionButton(for: post)
+        configureBoostButton(for: post)
+        configureBookmarkButton(isBookmarked: post.bookmarked)
+        configureReplyButton()
+        configureMoreMenu(isBookmarked: post.bookmarked)
 
-        // Heart / like button state — driven by actions_summary id==2
-        let likeAction = post.likeAction
-        let liked = likeAction?.acted == true
-        let canAct = likeAction?.canAct == true
-        let likeCount = likeAction?.count ?? 0
-        // The reactions row already shows the count; keep the heart as a
-        // plain action affordance with no inline number on the button.
-        let reactionsPluginActive = !validReactions.isEmpty
-        reactButton.setTitle(nil, for: .normal)
-        // Always set the heart symbol — overlay (userReactionImageView) hides
-        // it when needed but preserves the button's intrinsic size.
-        let heartImage = (liked && !reactionsPluginActive) ? Self.heartFillImage : Self.heartImage
-        reactButton.setImage(heartImage, for: .normal)
+        // Render content blocks
+        contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let views = NativeContentRenderer.renderBlocks(annotatedBlocks, config: config, delegate: delegate)
+        for view in views {
+            setupTextViews(in: view)
+            contentStackView.addArrangedSubview(view)
+        }
+        if let boostStripView = BoostStripView(boosts: post.boosts, baseURL: baseURL) {
+            contentStackView.addArrangedSubview(boostStripView)
+        }
+        if let relatedLinksView = RelatedLinksCardView(linkCounts: post.linkCounts, baseURL: baseURL) {
+            relatedLinksView.onTapURL = { [weak self] url in
+                self?.delegate?.postCell(didTapLinkURL: url)
+            }
+            contentStackView.addArrangedSubview(relatedLinksView)
+        }
 
-        if reactionsPluginActive, let userReaction = post.currentUserReaction {
-            applyUserReactionImage(userReaction.id)
+        AvatarImageLoader.setImage(
+            on: avatarImageView,
+            template: post.avatarTemplate,
+            baseURL: baseURL,
+            size: 96
+        )
+    }
+
+    private func applyCardStyle(isFirstPost: Bool) {
+        contentStackView.spacing = isFirstPost ? 12 : 10
+        cardMinHeightConstraint?.constant = isFirstPost ? 0 : Metrics.minimumReplyCardHeight
+        let contentInset = isFirstPost ? Metrics.firstPostContentInset : 0
+        contentStackTopConstraint?.constant = contentInset
+        contentStackLeadingConstraint?.constant = contentInset
+        contentStackTrailingConstraint?.constant = -contentInset
+        contentStackBottomConstraint?.constant = -contentInset
+
+        if isFirstPost {
+            cardView.backgroundColor = Self.firstPostPaperBackgroundColor
+            cardView.layer.cornerRadius = 20
+            cardView.layer.borderWidth = 1.0 / UIScreen.main.scale
+            cardView.layer.borderColor = Self.firstPostPaperBorderColor.resolvedColor(with: traitCollection).cgColor
+            cardView.layer.shadowOpacity = 0
+            cardView.layer.shadowOffset = .zero
+            cardView.layer.shadowRadius = 0
+            separatorLine.backgroundColor = .clear
+
+            contentCardView.backgroundColor = .clear
+            contentCardView.layer.borderWidth = 0
+            contentCardView.layer.borderColor = nil
+            contentCardView.layer.shadowOpacity = 0
+            contentCardView.layer.shadowOffset = .zero
+            contentCardView.layer.shadowRadius = 0
         } else {
-            cancelUserReactionImageLoad()
-            reactButton.tintColor = (liked && !reactionsPluginActive) ? .systemRed : .tertiaryLabel
-        }
-        // Enabled when the user can like, or has already liked (and may undo).
-        reactButton.isEnabled = canAct || liked
-        // Hide the button outright whenever it would be tappable-disabled —
-        // a greyed-out heart adds noise without offering anything to do.
-        // Exception: when the reactions plugin is active, always keep the
-        // heart visible so tapping it can open the reaction picker, even on
-        // posts where the plain like action isn't currently actionable.
-        // `hidesLikeButton` is the external force-hide (e.g. forums where the
-        // affordance is suppressed entirely).
-        reactButton.isHidden = hidesLikeButton || (!canAct && !liked && !reactionsPluginActive)
-        if hidesLikeButton {
-            reactButton.isEnabled = false
-            cancelUserReactionImageLoad()
-        }
+            cardView.backgroundColor = .secondarySystemGroupedBackground
+            cardView.layer.cornerRadius = 14
+            cardView.layer.borderWidth = 1.0 / UIScreen.main.scale
+            cardView.layer.borderColor = UIColor.separator.withAlphaComponent(0.35).cgColor
+            cardView.layer.shadowColor = UIColor.black.cgColor
+            cardView.layer.shadowOpacity = 0.035
+            cardView.layer.shadowOffset = CGSize(width: 0, height: 2)
+            cardView.layer.shadowRadius = 8
+            separatorLine.backgroundColor = UIColor.separator.withAlphaComponent(0.6)
 
-        reactButton.accessibilityLabel = liked
-            ? String(localized: "post.a11y.liked")
-            : String(localized: "post.a11y.like")
-        reactButton.accessibilityValue = likeCount > 0 ? "\(likeCount)" : nil
-
-        // Boost
-        let boostCount = post.boosts.count
-        let hasMine = post.boosts.contains { $0.canDelete == true }
-        boostButton.setImage(Self.boostFallbackImage, for: .normal)
-        boostButton.setTitle(boostCount > 0 ? " \(boostCount)" : nil, for: .normal)
-        boostButton.tintColor = hasMine ? .systemYellow : .tertiaryLabel
-        // Keep the button tappable when existing boosts are present (e.g. the user has
-        // already boosted this post — one per user — and wants to expand the list to
-        // inspect/delete theirs) even though `canBoost` is false in that case.
-        boostButton.isHidden = !post.canBoost && boostCount == 0
-        boostButton.isEnabled = post.canBoost || boostCount > 0
-        boostButton.accessibilityValue = boostCount > 0 ? "\(boostCount)" : nil
-
-        // More menu (copy link, bookmark, flag)
-        updateMoreMenu()
-
-        // Render content blocks — three tiers of reuse:
-        // 1. Same cell + same post → skip entirely (cheapest)
-        // 2. VC-level cached views → reparent existing views (no renderBlocks)
-        // 3. Full render from scratch (most expensive)
-        if post.id == renderedContentPostId {
-            // Tier 1: same cell, same post — just fix up delegates
-            FrameDropDetector.shared.log("reuse post#\(post.id) (same cell)")
-            reassignTextViewDelegates(in: contentStackView)
-        } else if let cached = cachedContentViews {
-            // Tier 2: views were rendered before, reparent them
-            let t0 = CACurrentMediaTime()
-            cancelContentImageLoads()
-            contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-            for view in cached {
-                contentStackView.addArrangedSubview(view)
-            }
-            reassignTextViewDelegates(in: contentStackView)
-            renderedContentPostId = post.id
-            let ms = (CACurrentMediaTime() - t0) * 1000
-            FrameDropDetector.shared.log("cached post#\(post.id): reparent=\(String(format: "%.1f", ms))ms views=\(cached.count)")
-        } else {
-            // Tier 3: full render
-            let t0 = CACurrentMediaTime()
-            cancelContentImageLoads()
-            contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
-            let t1 = CACurrentMediaTime()
-
-            let views = NativeContentRenderer.renderBlocks(
-                annotatedBlocks,
-                config: config,
-                delegate: delegate,
-                pollProvider: { name in
-                    guard let poll = post.polls.first(where: { $0.name == name }) else { return nil }
-                    let voted = Set(post.pollsVotes[name] ?? [])
-                    return (poll, voted, post)
-                },
-                precomputedBlockHeights: precomputedBlockHeights
-            )
-            let t2 = CACurrentMediaTime()
-
-            var allTextViews: [UITextView] = []
-            for view in views {
-                collectTextViews(in: view, into: &allTextViews)
-                contentStackView.addArrangedSubview(view)
-            }
-            for tv in allTextViews {
-                tv.delegate = self
-                (tv as? LinkTextView)?.configureSpoilerIfNeeded()
-            }
-            loadInlineImagesBatched(in: allTextViews)
-            let t3 = CACurrentMediaTime()
-            renderedContentPostId = post.id
-            FrameDropDetector.shared.log("render post#\(post.id): teardown=\(String(format: "%.1f", (t1-t0)*1000))ms renderBlocks=\(String(format: "%.1f", (t2-t1)*1000))ms addViews=\(String(format: "%.1f", (t3-t2)*1000))ms total=\(String(format: "%.1f", (t3-t0)*1000))ms")
-        }
-
-        if let template = post.avatarTemplate {
-            let sized = template.replacingOccurrences(of: "{size}", with: "96")
-            let urlString = sized.hasPrefix("http") ? sized : baseURL + sized
-            if let url = URL(string: urlString) {
-                avatarImageView.sd_setImage(with: url, context: ImageCacheManager.shared.avatarContext)
-            }
-        }
-
-        // Deleted-post placeholders are stand-in entries the nested-replies
-        // endpoint emits so the tree topology stays intact. They carry no
-        // author / content — render a slim "(deleted)" marker and hide every
-        // affordance that doesn't apply.
-        if post.deletedPostPlaceholder {
-            applyDeletedPlaceholderChrome()
+            contentCardView.backgroundColor = .clear
+            contentCardView.layer.borderWidth = 0
+            contentCardView.layer.borderColor = nil
+            contentCardView.layer.shadowOpacity = 0
+            contentCardView.layer.shadowOffset = .zero
+            contentCardView.layer.shadowRadius = 0
         }
     }
 
-    private func applyDeletedPlaceholderChrome() {
-        nameLabel.attributedText = nil
-        nameLabel.text = String(localized: "post.deleted_placeholder")
-        nameLabel.textColor = .tertiaryLabel
-        nameBackgroundView.isHidden = true
-        usernameLabel.isHidden = true
-        timeLabel.isHidden = true
-        floorLabel.isHidden = true
-        replyToLabel.isHidden = true
-        userTitleLabel.isHidden = true
-        flairImageView.isHidden = true
-        avatarImageView.sd_cancelCurrentImageLoad()
-        avatarImageView.image = nil
-        avatarImageView.backgroundColor = .tertiarySystemFill
-        replyButton.isHidden = true
-        reactButton.isHidden = true
-        boostButton.isHidden = true
-        moreButton.isHidden = true
-        showRepliesButton.isHidden = true
-        reactionStackView.isHidden = true
-        cancelUserReactionImageLoad()
-    }
-
-    /// Show the user's chosen reaction emoji as an overlay on top of the
-    /// (transparent) heart symbol. Using a fixed-size overlay keeps the
-    /// button's intrinsic size stable so neighbouring buttons (boost) don't
-    /// shift around when the source emoji image is large.
-    private func applyUserReactionImage(_ reactionId: String) {
-        userReactionImageView.sd_cancelCurrentImageLoad()
-        userReactionImageView.isHidden = false
-        // Hide the heart symbol underneath without losing the button's frame.
-        reactButton.tintColor = .clear
-        guard let urlString = EmojiStore.url(for: reactionId) ?? EmojiStore.lookup(for: reactionId),
-              let url = URL(string: urlString)
-        else {
-            // No mapping — restore the heart instead of leaving the slot blank.
-            cancelUserReactionImageLoad()
-            return
-        }
-        userReactionImageView.sd_setImage(with: url, context: ImageCacheManager.shared.emojiContext)
-    }
-
-    private func cancelUserReactionImageLoad() {
-        userReactionImageView.sd_cancelCurrentImageLoad()
-        userReactionImageView.image = nil
-        userReactionImageView.isHidden = true
+    private func configureRepliesButton(count: Int) {
+        var config = UIButton.Configuration.plain()
+        config.image = UIImage(systemName: "bubble.left.fill", withConfiguration: Self.actionSymbolConfig(pointSize: 13))
+        config.title = "\(count)"
+        config.imagePadding = 6
+        config.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 12, bottom: 0, trailing: 12)
+        config.baseForegroundColor = .secondaryLabel
+        config.background.backgroundColor = Self.actionBackgroundColor
+        config.background.cornerRadius = Self.bottomBarHeight / 2
+        showRepliesButton.configuration = config
+        showRepliesButton.clipsToBounds = true
     }
 
     private func configureReactions(_ reactions: [DiscourseTopicDetail.Reaction], count: Int, baseURL: String) {
         guard !reactions.isEmpty else {
             reactionStackView.isHidden = true
+            reactionCountLabel.isHidden = true
+            reactionPillWidthConstraint?.constant = 48
             return
         }
 
@@ -1072,7 +662,7 @@ final class PostNativeCell: UITableViewCell {
             if i < visible.count {
                 let reaction = visible[visible.index(visible.startIndex, offsetBy: i)]
                 if let url = URL(string: EmojiStore.lookup(for: reaction.id) ?? "") {
-                    iv.sd_setImage(with: url, context: ImageCacheManager.shared.emojiContext)
+                    iv.sd_setImage(with: url)
                 } else {
                     iv.sd_cancelCurrentImageLoad()
                     iv.image = nil
@@ -1093,99 +683,169 @@ final class PostNativeCell: UITableViewCell {
         }
 
         reactionStackView.isHidden = false
+        let visibleEmojiWidth = CGFloat(min(reactions.count, 3)) * 16 + CGFloat(max(0, min(reactions.count, 3) - 1)) * 2
+        let countWidth = count > 0 ? reactionCountLabel.intrinsicContentSize.width + 6 : 0
+        reactionPillWidthConstraint?.constant = min(max(48, 48 + visibleEmojiWidth + countWidth), 122)
     }
 
-    // MARK: - Content Reuse Helpers
-
-    private func cancelContentImageLoads() {
-        for view in contentStackView.arrangedSubviews {
-            if let container = view as? TappableImageContainer {
-                container.cancelImageLoad()
-            } else if let onebox = view as? OneboxCardView {
-                onebox.cancelImageLoad()
-            } else if let video = view as? VideoCardView {
-                video.cancelImageLoad()
-            }
-        }
+    private func configureReactionButton(for post: DiscourseTopicDetail.Post) {
+        let symbol = post.currentUserReaction == nil ? "heart" : "heart.fill"
+        let isActive = post.currentUserReaction != nil
+        configureActionButton(
+            reactButton,
+            symbolName: symbol,
+            tintColor: isActive ? .systemPink : .secondaryLabel,
+            backgroundColor: .clear,
+            accessibilityLabel: "喜欢"
+        )
+        reactionPillControl.backgroundColor = .clear
+        reactionPillControl.layer.borderWidth = 0
+        reactionPillControl.layer.borderColor = nil
     }
 
-    /// Re-attach UITextViewDelegate on existing content views after cell reuse
-    /// (delegate is nilled out in prepareForReuse).
-    private func reassignTextViewDelegates(in container: UIView) {
-        if let textView = container as? UITextView {
-            textView.delegate = self
-            return
+    private func configureBoostButton(for post: DiscourseTopicDetail.Post) {
+        configureActionButton(
+            boostButton,
+            image: Self.boostIconImage,
+            tintColor: .secondaryLabel,
+            backgroundColor: .clear,
+            accessibilityLabel: String(localized: "post.boost")
+        )
+        boostButton.isHidden = !post.canBoost
+    }
+
+    private func configureBookmarkButton(isBookmarked: Bool) {
+        configureActionButton(
+            bookmarkButton,
+            symbolName: isBookmarked ? "bookmark.fill" : "bookmark",
+            tintColor: isBookmarked ? .systemYellow : .secondaryLabel,
+            backgroundColor: .clear,
+            accessibilityLabel: isBookmarked ? "取消收藏" : "收藏"
+        )
+    }
+
+    private func configureReplyButton() {
+        configureActionButton(
+            replyButton,
+            symbolName: "arrowshape.turn.up.left.fill",
+            tintColor: .secondaryLabel,
+            backgroundColor: .clear,
+            accessibilityLabel: "回复"
+        )
+    }
+
+    private func configureMoreMenu(isBookmarked: Bool) {
+        configureActionButton(
+            moreButton,
+            symbolName: "ellipsis",
+            tintColor: .secondaryLabel,
+            backgroundColor: .clear,
+            accessibilityLabel: "更多"
+        )
+        let copyAction = UIAction(title: "复制链接", image: UIImage(systemName: "link")) { [weak self] _ in
+            self?.copyLinkTapped()
         }
-        for subview in container.subviews {
-            reassignTextViewDelegates(in: subview)
+        let bookmarkAction = UIAction(
+            title: isBookmarked ? "取消收藏" : "收藏",
+            image: UIImage(systemName: isBookmarked ? "bookmark.slash" : "bookmark")
+        ) { [weak self] _ in
+            self?.bookmarkButtonTapped()
         }
+        moreButton.menu = UIMenu(title: "", children: [bookmarkAction, copyAction])
+    }
+
+    private func configureActionButton(
+        _ button: UIButton,
+        symbolName: String,
+        tintColor: UIColor,
+        backgroundColor: UIColor,
+        accessibilityLabel: String?
+    ) {
+        configureActionButton(
+            button,
+            image: UIImage(systemName: symbolName, withConfiguration: Self.actionSymbolConfig()),
+            tintColor: tintColor,
+            backgroundColor: backgroundColor,
+            accessibilityLabel: accessibilityLabel
+        )
+    }
+
+    private func configureActionButton(
+        _ button: UIButton,
+        image: UIImage?,
+        tintColor: UIColor,
+        backgroundColor: UIColor,
+        accessibilityLabel: String?
+    ) {
+        var config = UIButton.Configuration.plain()
+        config.image = image?.withRenderingMode(.alwaysTemplate)
+        config.baseForegroundColor = tintColor
+        config.contentInsets = .zero
+        config.background.backgroundColor = backgroundColor
+        config.background.cornerRadius = Self.bottomBarHeight / 2
+        button.configuration = config
+        button.tintColor = tintColor
+        button.accessibilityLabel = accessibilityLabel
+        button.clipsToBounds = true
+    }
+
+    private static func actionSymbolConfig(pointSize: CGFloat = 16) -> UIImage.SymbolConfiguration {
+        UIImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold)
+    }
+
+    private static var actionBackgroundColor: UIColor {
+        .clear
     }
 
     // MARK: - View Setup
 
-    /// Recursively collect all UITextViews under `view` without doing any setup work.
-    private func collectTextViews(in view: UIView, into out: inout [UITextView]) {
-        if let tv = view as? UITextView {
-            out.append(tv)
+    private func setupTextViews(in view: UIView) {
+        if let textView = view as? LinkTextView {
+            textView.delegate = self
+            textView.configureSpoilerIfNeeded()
+            loadInlineImages(in: textView)
+            return
+        }
+        if let textView = view as? UITextView {
+            textView.delegate = self
+            loadInlineImages(in: textView)
             return
         }
         for subview in view.subviews {
-            collectTextViews(in: subview, into: &out)
+            setupTextViews(in: subview)
         }
     }
 
     // MARK: - Inline Image Loading
 
-    /// Held briefly while batching inline-image loads. Explicitly `nonisolated`
-    /// to opt out of the project-wide default `@MainActor` isolation — the
-    /// back-deployed Swift Concurrency runtime (used because deployment target
-    /// is < iOS 17) crashes inside `swift_task_deinitOnExecutorMainActorBackDeploy`
-    /// → `TaskLocal::StopLookupScope::~StopLookupScope` when actor-isolated
-    /// classes are deinitted in this code path. A pure-data holder doesn't
-    /// need actor isolation anyway.
-    private nonisolated final class InlineImageEntry {
-        let attachment: NSTextAttachment
-        let location: Int
-        weak var textView: UITextView?
-        init(attachment: NSTextAttachment, location: Int, textView: UITextView) {
-            self.attachment = attachment
-            self.location = location
-            self.textView = textView
-        }
-    }
+    private func loadInlineImages(in textView: UITextView) {
+        guard let attrText = textView.attributedText else { return }
+        let full = NSRange(location: 0, length: attrText.length)
 
-    /// Batch inline-image loading across every textView in the post, deduped by URL.
-    /// A post with N identical emoji URLs collapses from N SDWebImage calls to 1.
-    private func loadInlineImagesBatched(in textViews: [UITextView]) {
-        var byURL: [URL: [InlineImageEntry]] = [:]
-        for textView in textViews {
-            guard let attrText = textView.attributedText else { continue }
-            let full = NSRange(location: 0, length: attrText.length)
-            attrText.enumerateAttribute(.cookedHTMLImageURL, in: full) { value, range, _ in
-                guard let urlString = value as? String,
-                      let url = URL(string: urlString) else { return }
-                // enumerateAttribute merges adjacent same-URL chars into one range —
-                // iterate char-by-char so each attachment gets its own entry.
-                for i in 0 ..< range.length {
-                    let loc = range.location + i
-                    if let attachment = attrText.attribute(.attachment, at: loc, effectiveRange: nil) as? NSTextAttachment {
-                        byURL[url, default: []].append(InlineImageEntry(attachment: attachment, location: loc, textView: textView))
-                    }
+        // Collect all (attachment, location, url, isEmoji) first — enumerateAttribute merges
+        // adjacent characters that share the same URL into one range, so we must
+        // iterate character-by-character inside each range.
+        var entries: [(attachment: NSTextAttachment, location: Int, url: URL, isEmoji: Bool)] = []
+        attrText.enumerateAttribute(.cookedHTMLImageURL, in: full) { value, range, _ in
+            guard let urlString = value as? String,
+                  let url = URL(string: urlString) else { return }
+            for i in 0 ..< range.length {
+                let loc = range.location + i
+                if let attachment = attrText.attribute(.attachment, at: loc, effectiveRange: nil) as? NSTextAttachment {
+                    // Emoji attachments have small bounds (≤ lineHeight); non-emoji have larger bounds
+                    let isEmoji = attachment.bounds.width <= 24 && attachment.bounds.height <= 24
+                    entries.append((attachment, loc, url, isEmoji))
                 }
             }
         }
 
-        for (url, entries) in byURL {
-            SDWebImageManager.shared.loadImage(with: url, options: [], context: ImageCacheManager.shared.emojiContext, progress: nil) { image, _, _, _, _, _ in
-                guard let image else { return }
-                for entry in entries {
-                    entry.attachment.image = image
-                    if let tv = entry.textView {
-                        // Keep the bounds already set by the attributed string builder
-                        let charRange = NSRange(location: entry.location, length: 1)
-                        tv.textStorage.edited(.editedAttributes, range: charRange, changeInLength: 0)
-                    }
-                }
+        for entry in entries {
+            SDWebImageManager.shared.loadImage(with: entry.url, progress: nil) { [weak textView] image, _, _, _, _, _ in
+                guard let textView, let image else { return }
+                entry.attachment.image = image
+                // Keep the bounds already set by the attributed string builder
+                let charRange = NSRange(location: entry.location, length: 1)
+                textView.textStorage.edited(.editedAttributes, range: charRange, changeInLength: 0)
             }
         }
     }
@@ -1194,10 +854,6 @@ final class PostNativeCell: UITableViewCell {
 
     @objc private func repliesButtonTapped() {
         delegate?.postCell(didTapShowRepliesForPostId: postId)
-    }
-
-    @objc private func collapseButtonTapped() {
-        delegate?.postCell(didToggleCollapseForPostId: postId)
     }
 
     @objc private func replyButtonTapped() {
@@ -1210,207 +866,113 @@ final class PostNativeCell: UITableViewCell {
         delegate?.postCell(didTapAvatarForUsername: username)
     }
 
-    @objc private func replyReferenceTapped() {
-        guard let post = currentPost, post.replyToPostNumber != nil else { return }
-        delegate?.postCell(didTapReplyReferenceForPost: post)
-    }
-
-    @objc private func cellLongPressed(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, let post = currentPost else { return }
-        delegate?.postCell(didLongPressPost: post)
-    }
-
-    private func updateMoreMenu() {
-        guard let post = currentPost else { return }
-        var actions: [UIAction] = []
-
-        // Copy Link
-        actions.append(UIAction(
-            title: String(localized: "post.copy_link"),
-            image: UIImage(systemName: "link")
-        ) { [weak self] _ in
-            guard let link = self?.postLink else { return }
-            UIPasteboard.general.string = link
-        })
-
-        // Bookmark
-        let isBookmarked = post.bookmarked
-        actions.append(UIAction(
-            title: isBookmarked ? String(localized: "post.remove_bookmark") : String(localized: "post.bookmark"),
-            image: UIImage(systemName: isBookmarked ? "bookmark.fill" : "bookmark")
-        ) { [weak self] _ in
-            guard let self, let post = self.currentPost else { return }
-            self.delegate?.postCell(didToggleBookmarkForPost: post, isBookmarked: !isBookmarked)
-        })
-
-        // Flag / Report — only if the server says we can
-        if post.canFlag {
-            actions.append(UIAction(
-                title: String(localized: "post.flag"),
-                image: UIImage(systemName: "flag"),
-                attributes: .destructive
-            ) { [weak self] _ in
-                guard let self, let post = self.currentPost else { return }
-                self.delegate?.postCell(didTapFlagPost: post, sourceView: self.moreButton)
-            })
+    @objc private func copyLinkTapped() {
+        guard let link = postLink else { return }
+        UIPasteboard.general.string = link
+        configureActionButton(
+            moreButton,
+            symbolName: "checkmark",
+            tintColor: .systemGreen,
+            backgroundColor: UIColor.systemGreen.withAlphaComponent(0.14),
+            accessibilityLabel: "已复制"
+        )
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            guard let self else { return }
+            self.configureMoreMenu(isBookmarked: self.isBookmarked)
         }
+    }
 
-        moreButton.menu = UIMenu(children: actions)
+    @objc private func sourceButtonTapped() {
+        UIPasteboard.general.string = cookedHTML
+        let config = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        sourceButton.setImage(UIImage(systemName: "checkmark", withConfiguration: config), for: .normal)
+        sourceButton.tintColor = .systemGreen
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            self?.sourceButton.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: config), for: .normal)
+            self?.sourceButton.tintColor = .tertiaryLabel
+        }
     }
 
     @objc private func reactButtonTapped() {
         guard let post = currentPost else { return }
-
-        // Reactions plugin path. The standard like is undone via DELETE
-        // /post_actions, but any non-heart reaction can only be cleared via
-        // the reactions toggle endpoint — keep the cancel path consistent
-        // and route every interaction through toggleReaction.
-        if !validReactions.isEmpty {
-            if let userReaction = post.currentUserReaction {
-                // Already reacted — tap clears it (if still within the undo
-                // window). Past the window, show the picker so the user can
-                // pick again or no-op.
-                if userReaction.canUndo == true {
-                    delegate?.postCell(didTapReaction: userReaction.id, forPost: post)
-                } else {
-                    presentReactionPicker(for: post)
-                }
-            } else {
-                presentReactionPicker(for: post)
-            }
-            return
-        }
-
-        // No reactions plugin — tap toggles the standard like.
-        let wasLiked = post.likeAction?.acted == true
-        let liked = !wasLiked
-
-        // Past the unlike grace window — Discourse rejects the DELETE.
-        if !liked, post.likeAction?.canUndo == false { return }
-
-        // Optimistic UI — server state will reconcile on next refresh.
-        if liked {
-            reactButton.setImage(Self.heartFillImage, for: .normal)
-            reactButton.tintColor = .systemRed
-        } else {
-            reactButton.setImage(Self.heartImage, for: .normal)
-            reactButton.tintColor = .tertiaryLabel
-        }
-
-        delegate?.postCell(didToggleLikeForPost: post, liked: liked)
+        let reactionId = post.currentUserReaction?.id ?? "heart"
+        delegate?.postCell(didTapReaction: reactionId, forPost: post)
     }
 
-    @objc private func reactButtonLongPressed(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, let post = currentPost else { return }
-        // Respect the same gating as a tap — own posts shouldn't open the picker.
-        guard reactButton.isEnabled else { return }
-
-        if validReactions.isEmpty {
-            // No reactions plugin — long press behaves the same as tap.
-            let wasLiked = post.likeAction?.acted == true
-            delegate?.postCell(didToggleLikeForPost: post, liked: !wasLiked)
-            return
-        }
-
+    @objc private func reactionPillLongPressed(_ gesture: UILongPressGestureRecognizer) {
+        guard gesture.state == .began,
+              let post = currentPost,
+              !validReactions.isEmpty
+        else { return }
         presentReactionPicker(for: post)
     }
 
     private func presentReactionPicker(for post: DiscourseTopicDetail.Post) {
-        // Build emoji picker as a 2-row grid in a popover. The popover's own
-        // chrome is hidden (clear background) so we can draw a tighter rounded
-        // card ourselves with a corner radius and padding under our control.
         let pickerVC = UIViewController()
-        let emojiSize: CGFloat = 32
-        let hSpacing: CGFloat = 8
-        let vSpacing: CGFloat = 8
-        let hPadding: CGFloat = 16
-        let vPadding: CGFloat = 14
-        let cornerRadius: CGFloat = 14
-
-        // Split reactions into two roughly-equal rows; first row gets the
-        // ceiling so an odd count keeps the longer row on top.
-        let total = validReactions.count
-        let firstRowCount = (total + 1) / 2
-        let row1 = Array(validReactions.prefix(firstRowCount))
-        let row2 = Array(validReactions.dropFirst(firstRowCount))
-
-        // Shadow wrapper (no clipping) → rounded card (clips content). Keeping
-        // the shadow and the corner-clip on separate layers avoids the shadow
-        // being trimmed by `clipsToBounds`.
-        let shadowWrapper = UIView()
-        shadowWrapper.translatesAutoresizingMaskIntoConstraints = false
-        shadowWrapper.backgroundColor = .clear
-        shadowWrapper.layer.shadowColor = UIColor.black.cgColor
-        shadowWrapper.layer.shadowOpacity = 0.18
-        shadowWrapper.layer.shadowRadius = 12
-        shadowWrapper.layer.shadowOffset = CGSize(width: 0, height: 4)
-
-        let card = UIView()
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.backgroundColor = ThemeManager.shared.cardBackgroundColor
-        card.layer.cornerRadius = cornerRadius
-        card.layer.cornerCurve = .continuous
-        card.clipsToBounds = true
-
-        let outerStack = UIStackView()
-        outerStack.axis = .vertical
-        outerStack.spacing = vSpacing
-        outerStack.alignment = .leading
-        outerStack.translatesAutoresizingMaskIntoConstraints = false
-
-        pickerVC.view.backgroundColor = .clear
-        pickerVC.view.addSubview(shadowWrapper)
-        shadowWrapper.addSubview(card)
-        card.addSubview(outerStack)
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.spacing = 8
+        stack.alignment = .center
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        pickerVC.view.addSubview(stack)
         NSLayoutConstraint.activate([
-            shadowWrapper.topAnchor.constraint(equalTo: pickerVC.view.topAnchor),
-            shadowWrapper.leadingAnchor.constraint(equalTo: pickerVC.view.leadingAnchor),
-            shadowWrapper.trailingAnchor.constraint(equalTo: pickerVC.view.trailingAnchor),
-            shadowWrapper.bottomAnchor.constraint(equalTo: pickerVC.view.bottomAnchor),
-            card.topAnchor.constraint(equalTo: shadowWrapper.topAnchor),
-            card.leadingAnchor.constraint(equalTo: shadowWrapper.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: shadowWrapper.trailingAnchor),
-            card.bottomAnchor.constraint(equalTo: shadowWrapper.bottomAnchor),
-            outerStack.topAnchor.constraint(equalTo: card.topAnchor, constant: vPadding),
-            outerStack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: hPadding),
-            // Don't pin trailing/bottom — let the stack size to its intrinsic
-            // content so `systemLayoutSizeFitting` below reads the real size.
-            // The card fills the view (== preferredContentSize), so the
-            // trailing/bottom padding ends up exactly hPadding/vPadding.
+            stack.topAnchor.constraint(equalTo: pickerVC.view.topAnchor, constant: 8),
+            stack.bottomAnchor.constraint(equalTo: pickerVC.view.bottomAnchor, constant: -8),
+            stack.leadingAnchor.constraint(equalTo: pickerVC.view.leadingAnchor, constant: 12),
+            stack.trailingAnchor.constraint(equalTo: pickerVC.view.trailingAnchor, constant: -12),
         ])
 
-        for rowIds in [row1, row2] where !rowIds.isEmpty {
-            let row = UIStackView()
-            row.axis = .horizontal
-            row.spacing = hSpacing
-            row.alignment = .center
-            for reactionId in rowIds {
-                row.addArrangedSubview(makeReactionButton(reactionId: reactionId, size: emojiSize, presenter: pickerVC))
+        let emojiSize: CGFloat = 28
+        for reactionId in validReactions {
+            let button = UIButton(type: .custom)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: emojiSize),
+                button.heightAnchor.constraint(equalToConstant: emojiSize),
+            ])
+            button.accessibilityLabel = reactionId
+
+            if let urlString = EmojiStore.url(for: reactionId) ?? EmojiStore.lookup(for: reactionId),
+               let url = URL(string: urlString)
+            {
+                let iv = UIImageView()
+                iv.contentMode = .scaleAspectFit
+                iv.translatesAutoresizingMaskIntoConstraints = false
+                iv.sd_setImage(with: url)
+                iv.isUserInteractionEnabled = false
+                button.addSubview(iv)
+                NSLayoutConstraint.activate([
+                    iv.topAnchor.constraint(equalTo: button.topAnchor),
+                    iv.bottomAnchor.constraint(equalTo: button.bottomAnchor),
+                    iv.leadingAnchor.constraint(equalTo: button.leadingAnchor),
+                    iv.trailingAnchor.constraint(equalTo: button.trailingAnchor),
+                ])
+            } else {
+                button.setTitle(":\(reactionId):", for: .normal)
+                button.titleLabel?.font = .systemFont(ofSize: 12)
+                button.setTitleColor(.label, for: .normal)
             }
-            outerStack.addArrangedSubview(row)
+
+            button.addAction(UIAction { [weak self] _ in
+                guard let self, let post = self.currentPost else { return }
+                pickerVC.dismiss(animated: true)
+                self.delegate?.postCell(didTapReaction: reactionId, forPost: post)
+            }, for: .touchUpInside)
+
+            stack.addArrangedSubview(button)
         }
 
-        // Force a layout pass and read the resulting content size — avoids
-        // the bottom row getting clipped when manual math drifts from the
-        // real stack geometry (button insets, baseline alignment, etc.).
-        pickerVC.view.layoutIfNeeded()
-        let fittingSize = outerStack.systemLayoutSizeFitting(
-            UIView.layoutFittingCompressedSize,
-            withHorizontalFittingPriority: .fittingSizeLevel,
-            verticalFittingPriority: .fittingSizeLevel
+        let pickerSize = CGSize(
+            width: CGFloat(validReactions.count) * (emojiSize + 8) + 16,
+            height: emojiSize + 16
         )
-        pickerVC.preferredContentSize = CGSize(
-            width: fittingSize.width + hPadding * 2,
-            height: fittingSize.height + vPadding * 2
-        )
+        pickerVC.preferredContentSize = pickerSize
         pickerVC.modalPresentationStyle = .popover
         if let popover = pickerVC.popoverPresentationController {
-            popover.sourceView = reactButton
-            popover.sourceRect = reactButton.bounds
+            popover.sourceView = reactionPillControl
+            popover.sourceRect = reactionPillControl.bounds
             popover.permittedArrowDirections = [.down, .up]
             popover.delegate = self
-            // Hide the system popover chrome so only our rounded card shows.
-            popover.backgroundColor = .clear
         }
 
         // Find presenting view controller
@@ -1424,70 +986,40 @@ final class PostNativeCell: UITableViewCell {
         }
     }
 
-    private func makeReactionButton(reactionId: String, size: CGFloat, presenter: UIViewController) -> UIButton {
-        let button = UIButton(type: .custom)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: size),
-            button.heightAnchor.constraint(equalToConstant: size),
-        ])
-        button.accessibilityLabel = String(localized: "post.a11y.reaction \(reactionId)")
-
-        if let urlString = EmojiStore.url(for: reactionId) ?? EmojiStore.lookup(for: reactionId),
-           let url = URL(string: urlString)
-        {
-            let iv = UIImageView()
-            iv.contentMode = .scaleAspectFit
-            iv.translatesAutoresizingMaskIntoConstraints = false
-            iv.sd_setImage(with: url, context: ImageCacheManager.shared.emojiContext)
-            iv.isUserInteractionEnabled = false
-            button.addSubview(iv)
-            NSLayoutConstraint.activate([
-                iv.topAnchor.constraint(equalTo: button.topAnchor, constant: 2),
-                iv.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -2),
-                iv.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 2),
-                iv.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
-            ])
-        } else {
-            button.setTitle(":\(reactionId):", for: .normal)
-            button.titleLabel?.font = FontManager.shared.font(size: 11)
-            button.setTitleColor(.label, for: .normal)
-        }
-
-        button.addAction(UIAction { [weak self, weak presenter] _ in
-            guard let self, let post = self.currentPost else { return }
-            presenter?.dismiss(animated: true)
-            // Reactions plugin path — every emoji (heart included) goes
-            // through the toggle endpoint, which handles add/remove.
-            self.delegate?.postCell(didTapReaction: reactionId, forPost: post)
-        }, for: .touchUpInside)
-
-        return button
-    }
-
     @objc private func boostButtonTapped() {
         guard let post = currentPost else { return }
-        if post.boosts.isEmpty {
-            delegate?.postCell(didTapBoostForPost: post)
-        } else {
-            delegate?.postCell(didTapToggleBoostsForPost: post, sourceView: boostButton)
-        }
+        delegate?.postCell(didTapBoostForPost: post)
     }
 
-    @objc private func boostButtonLongPressed(_ gesture: UILongPressGestureRecognizer) {
-        guard gesture.state == .began, let post = currentPost else { return }
-        delegate?.postCell(didTapBoostForPost: post)
+    @objc private func bookmarkButtonTapped() {
+        guard let post = currentPost else { return }
+        let targetState = !isBookmarked
+        isBookmarked = targetState
+        configureBookmarkButton(isBookmarked: targetState)
+        configureMoreMenu(isBookmarked: targetState)
+        delegate?.postCell(didToggleBookmarkForPost: post, isBookmarked: targetState)
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        // Keep content views alive — they will be reused if the same post is
-        // reassigned, or torn down at the start of configure() otherwise.
-        // renderedContentPostId is intentionally NOT reset.
+        // Cancel block-level image loads and fallback renders
+        for view in contentStackView.arrangedSubviews {
+            if let container = view as? TappableImageContainer {
+                container.cancelImageLoad()
+            } else if let onebox = view as? OneboxCardView {
+                onebox.cancelImageLoad()
+            } else if let video = view as? VideoCardView {
+                video.cancelImageLoad()
+            } else if let fallback = view as? FallbackBlockView {
+                fallback.cancelRender()
+            }
+        }
+        contentStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
         delegate = nil
         postId = 0
         postLink = nil
         currentPost = nil
+        cookedHTML = ""
         usernameLabel.text = nil
         timeLabel.text = nil
         floorLabel.text = nil
@@ -1495,9 +1027,9 @@ final class PostNativeCell: UITableViewCell {
         replyToLabel.text = nil
         replyToLabel.isHidden = true
         showRepliesButton.isHidden = true
+        sourceButton.isHidden = true
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
-        nameLabel.attributedText = nil
         userTitleLabel.text = nil
         userTitleLabel.isHidden = true
         flairImageView.sd_cancelCurrentImageLoad()
@@ -1512,45 +1044,54 @@ final class PostNativeCell: UITableViewCell {
         }
         reactionCountLabel.isHidden = true
         validReactions = []
-        cancelUserReactionImageLoad()
-        reactButton.setImage(Self.heartImage, for: .normal)
-        reactButton.setTitle(nil, for: .normal)
-        reactButton.tintColor = .tertiaryLabel
-        reactButton.isEnabled = true
-        reactButton.isHidden = false
-        boostButton.setImage(Self.boostFallbackImage, for: .normal)
-        boostButton.setTitle(nil, for: .normal)
-        boostButton.tintColor = .tertiaryLabel
+        isBookmarked = false
+        reactionPillWidthConstraint?.constant = 48
+        configureActionButton(
+            reactButton,
+            symbolName: "heart",
+            tintColor: .secondaryLabel,
+            backgroundColor: .clear,
+            accessibilityLabel: "喜欢"
+        )
+        reactionPillControl.backgroundColor = Self.actionBackgroundColor
+        reactionPillControl.layer.borderWidth = 0
+        reactionPillControl.layer.borderColor = nil
+        configureActionButton(
+            boostButton,
+            image: Self.boostIconImage,
+            tintColor: .secondaryLabel,
+            backgroundColor: .clear,
+            accessibilityLabel: String(localized: "post.boost")
+        )
         boostButton.isHidden = false
-        boostButton.isEnabled = true
-        moreButton.menu = nil
-        moreButton.isHidden = false
-        separatorLine.isHidden = false
-        // Reset any deleted-placeholder customisations so the next cell reuse
-        // sees a clean slate (nameLabel color, avatar background fill).
-        nameLabel.textColor = .label
-        avatarImageView.backgroundColor = nil
+        configureBookmarkButton(isBookmarked: false)
+        configureReplyButton()
+        configureMoreMenu(isBookmarked: false)
+        let sourceConfig = UIImage.SymbolConfiguration(pointSize: 11, weight: .medium)
+        sourceButton.setImage(UIImage(systemName: "doc.on.clipboard", withConfiguration: sourceConfig), for: .normal)
+        sourceButton.tintColor = .tertiaryLabel
     }
 
-    private static let isoFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private static let relativeFormatter: RelativeDateTimeFormatter = {
-        let f = RelativeDateTimeFormatter()
-        f.unitsStyle = .abbreviated
-        return f
-    }()
-
     private static func formatDate(_ isoString: String) -> String {
-        guard let date = isoFormatter.date(from: isoString) else { return isoString }
-        let now = Date()
-        if abs(date.timeIntervalSince(now)) < 5 {
-            return String(localized: "time.just_now")
-        }
-        return relativeFormatter.localizedString(for: date, relativeTo: now)
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        guard let date = formatter.date(from: isoString) else { return isoString }
+        let relative = RelativeDateTimeFormatter()
+        relative.unitsStyle = .abbreviated
+        return relative.localizedString(for: date, relativeTo: Date())
+    }
+}
+
+// MARK: - UIColor hex helper
+
+private extension UIColor {
+    convenience init?(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard hex.count == 6, let int = UInt64(hex, radix: 16) else { return nil }
+        let r = CGFloat((int >> 16) & 0xFF) / 255
+        let g = CGFloat((int >> 8) & 0xFF) / 255
+        let b = CGFloat(int & 0xFF) / 255
+        self.init(red: r, green: g, blue: b, alpha: 1)
     }
 }
 
@@ -1558,6 +1099,9 @@ final class PostNativeCell: UITableViewCell {
 
 extension PostNativeCell: UITextViewDelegate {
     func textView(_ textView: UITextView, shouldInteractWith URL: URL, in characterRange: NSRange, interaction: UITextItemInteraction) -> Bool {
+        guard interaction == .invokeDefaultAction else {
+            return true
+        }
         delegate?.postCell(didTapLinkURL: URL)
         return false
     }
@@ -1569,4 +1113,522 @@ extension PostNativeCell: UIPopoverPresentationControllerDelegate {
     func adaptivePresentationStyle(for controller: UIPresentationController) -> UIModalPresentationStyle {
         .none
     }
+}
+
+// MARK: - Related Links
+
+private final class RelatedLinksCardView: UIView {
+    var onTapURL: ((URL) -> Void)?
+
+    private let links: [RelatedLink]
+    private let baseURL: String
+    private var isExpanded = false
+    private var showsAllLinks = false
+
+    private let stackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
+    private let linksStackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
+    private let chevronView: UIImageView = {
+        let imageView = UIImageView(image: UIImage(systemName: "chevron.down"))
+        imageView.tintColor = .secondaryLabel
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+
+    init?(linkCounts: [DiscourseTopicDetail.LinkCount], baseURL: String) {
+        let filtered = Self.makeRelatedLinks(from: linkCounts)
+        guard !filtered.isEmpty else { return nil }
+        self.links = filtered
+        self.baseURL = baseURL
+        super.init(frame: .zero)
+        setupViews()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        translatesAutoresizingMaskIntoConstraints = false
+        backgroundColor = .tertiarySystemGroupedBackground
+        layer.cornerRadius = 12
+        layer.cornerCurve = .continuous
+        layer.borderWidth = 1.0 / UIScreen.main.scale
+        layer.borderColor = UIColor.separator.withAlphaComponent(0.35).cgColor
+        clipsToBounds = true
+
+        addSubview(stackView)
+        NSLayoutConstraint.activate([
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        stackView.addArrangedSubview(makeHeader())
+        stackView.addArrangedSubview(linksStackView)
+        rebuildLinks()
+    }
+
+    private func makeHeader() -> UIView {
+        let button = UIButton(type: .system)
+        button.tintColor = .label
+        button.contentHorizontalAlignment = .fill
+        button.addTarget(self, action: #selector(toggleExpanded), for: .touchUpInside)
+
+        let iconView = UIImageView(image: UIImage(systemName: "link"))
+        iconView.tintColor = .systemBlue
+        iconView.contentMode = .scaleAspectFit
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = UILabel()
+        titleLabel.text = String(localized: "post.related_links")
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = .systemBlue
+
+        let countLabel = UILabel()
+        countLabel.text = "\(links.count)"
+        countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        countLabel.textColor = .systemBlue
+        countLabel.textAlignment = .center
+        countLabel.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.12)
+        countLabel.layer.cornerRadius = 8
+        countLabel.clipsToBounds = true
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleStack = UIStackView(arrangedSubviews: [iconView, titleLabel, countLabel])
+        titleStack.axis = .horizontal
+        titleStack.spacing = 8
+        titleStack.alignment = .center
+        titleStack.isUserInteractionEnabled = false
+        titleStack.translatesAutoresizingMaskIntoConstraints = false
+
+        button.addSubview(titleStack)
+        button.addSubview(chevronView)
+
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
+            countLabel.heightAnchor.constraint(equalToConstant: 18),
+
+            titleStack.topAnchor.constraint(equalTo: button.topAnchor, constant: 10),
+            titleStack.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 12),
+            titleStack.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -10),
+            titleStack.trailingAnchor.constraint(lessThanOrEqualTo: chevronView.leadingAnchor, constant: -8),
+
+            chevronView.centerYAnchor.constraint(equalTo: titleStack.centerYAnchor),
+            chevronView.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -12),
+            chevronView.widthAnchor.constraint(equalToConstant: 16),
+            chevronView.heightAnchor.constraint(equalToConstant: 16),
+        ])
+
+        return button
+    }
+
+    private func rebuildLinks() {
+        linksStackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        linksStackView.isHidden = !isExpanded
+        guard isExpanded else { return }
+
+        let separator = UIView()
+        separator.backgroundColor = UIColor.separator.withAlphaComponent(0.45)
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale).isActive = true
+        linksStackView.addArrangedSubview(separator)
+
+        let maxVisibleLinks = 5
+        let visibleLinks = showsAllLinks ? links : Array(links.prefix(maxVisibleLinks))
+        for link in visibleLinks {
+            linksStackView.addArrangedSubview(makeLinkRow(link))
+        }
+
+        if links.count > maxVisibleLinks, !showsAllLinks {
+            let remaining = links.count - maxVisibleLinks
+            let button = UIButton(type: .system)
+            button.addAction(UIAction { [weak self] _ in
+                self?.showsAllLinks = true
+                self?.rebuildLinks()
+                self?.invalidateTableHeight()
+            }, for: .touchUpInside)
+
+            let label = UILabel()
+            label.text = String.localizedStringWithFormat(String(localized: "post.more_links %lld"), Int64(remaining))
+            label.font = .systemFont(ofSize: 12, weight: .medium)
+            label.textColor = .systemBlue
+            label.textAlignment = .center
+            label.translatesAutoresizingMaskIntoConstraints = false
+
+            button.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.topAnchor.constraint(equalTo: button.topAnchor, constant: 10),
+                label.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 12),
+                label.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -12),
+                label.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -10),
+            ])
+            linksStackView.addArrangedSubview(button)
+        }
+    }
+
+    private func makeLinkRow(_ link: RelatedLink) -> UIView {
+        let button = UIButton(type: .system)
+        button.tintColor = .label
+        button.contentHorizontalAlignment = .fill
+        button.addAction(UIAction { [weak self] _ in
+            guard let url = self?.resolvedURL(for: link.url) else { return }
+            self?.onTapURL?(url)
+        }, for: .touchUpInside)
+
+        let iconView = UIImageView(image: UIImage(systemName: "arrow.turn.down.right"))
+        iconView.tintColor = .secondaryLabel
+        iconView.contentMode = .scaleAspectFit
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        let titleLabel = UILabel()
+        titleLabel.text = link.title
+        titleLabel.font = .systemFont(ofSize: 13)
+        titleLabel.textColor = .systemBlue
+        titleLabel.numberOfLines = 2
+
+        let clickLabel = UILabel()
+        clickLabel.text = Self.formatClicks(link.clicks)
+        clickLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .medium)
+        clickLabel.textColor = .secondaryLabel
+        clickLabel.textAlignment = .center
+        clickLabel.backgroundColor = .secondarySystemFill
+        clickLabel.layer.cornerRadius = 7
+        clickLabel.clipsToBounds = true
+        clickLabel.isHidden = link.clicks <= 0
+        clickLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let outwardView = UIImageView(image: UIImage(systemName: "arrow.up.forward"))
+        outwardView.tintColor = .tertiaryLabel
+        outwardView.contentMode = .scaleAspectFit
+        outwardView.translatesAutoresizingMaskIntoConstraints = false
+
+        let rowStack = UIStackView(arrangedSubviews: [iconView, titleLabel, clickLabel, outwardView])
+        rowStack.axis = .horizontal
+        rowStack.spacing = 8
+        rowStack.alignment = .center
+        rowStack.isUserInteractionEnabled = false
+        rowStack.translatesAutoresizingMaskIntoConstraints = false
+        button.addSubview(rowStack)
+
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: 16),
+            iconView.heightAnchor.constraint(equalToConstant: 16),
+            clickLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
+            clickLabel.heightAnchor.constraint(equalToConstant: 18),
+            outwardView.widthAnchor.constraint(equalToConstant: 14),
+            outwardView.heightAnchor.constraint(equalToConstant: 14),
+
+            rowStack.topAnchor.constraint(equalTo: button.topAnchor, constant: 10),
+            rowStack.leadingAnchor.constraint(equalTo: button.leadingAnchor, constant: 12),
+            rowStack.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -12),
+            rowStack.bottomAnchor.constraint(equalTo: button.bottomAnchor, constant: -10),
+        ])
+
+        return button
+    }
+
+    @objc private func toggleExpanded() {
+        isExpanded.toggle()
+        UIView.animate(withDuration: 0.2) {
+            self.chevronView.transform = self.isExpanded ? CGAffineTransform(rotationAngle: .pi) : .identity
+        }
+        rebuildLinks()
+        invalidateTableHeight()
+    }
+
+    private func invalidateTableHeight() {
+        setNeedsLayout()
+        layoutIfNeeded()
+        var view: UIView? = superview
+        while let current = view {
+            if let tableView = current as? UITableView {
+                tableView.beginUpdates()
+                tableView.endUpdates()
+                return
+            }
+            view = current.superview
+        }
+    }
+
+    private func resolvedURL(for rawURL: String) -> URL? {
+        if let url = URL(string: rawURL), url.scheme != nil {
+            return url
+        }
+        return URL(string: rawURL, relativeTo: URL(string: baseURL))?.absoluteURL
+    }
+
+    private static func makeRelatedLinks(from linkCounts: [DiscourseTopicDetail.LinkCount]) -> [RelatedLink] {
+        var seen = Set<String>()
+        var links: [RelatedLink] = []
+
+        for linkCount in linkCounts {
+            guard linkCount.internalLink,
+                  linkCount.reflection,
+                  !linkCount.url.isEmpty,
+                  let title = linkCount.title,
+                  !title.isEmpty
+            else { continue }
+
+            let key = "\(title.lowercased())|\(linkCount.url.lowercased())"
+            guard seen.insert(key).inserted else { continue }
+            links.append(RelatedLink(title: title, url: linkCount.url, clicks: linkCount.clicks))
+        }
+
+        return links
+    }
+
+    private static func formatClicks(_ count: Int) -> String {
+        if count >= 1000 {
+            return String(format: "%.1fk", Double(count) / 1000)
+        }
+        return "\(count)"
+    }
+}
+
+private struct RelatedLink: Hashable {
+    let title: String
+    let url: String
+    let clicks: Int
+}
+
+// MARK: - Boost Strip
+
+private final class BoostStripView: UIView {
+    private let groups: [BoostGroup]
+    private let baseURL: String
+
+    private let scrollView: UIScrollView = {
+        let scrollView = UIScrollView()
+        scrollView.showsHorizontalScrollIndicator = false
+        scrollView.alwaysBounceHorizontal = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        return scrollView
+    }()
+
+    private let stackView: UIStackView = {
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 8
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        return stack
+    }()
+
+    init?(boosts: [DiscourseTopicDetail.Boost], baseURL: String) {
+        let groups = Self.makeGroups(from: boosts)
+        guard !groups.isEmpty else { return nil }
+        self.groups = groups
+        self.baseURL = baseURL
+        super.init(frame: .zero)
+        setupViews()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    private func setupViews() {
+        translatesAutoresizingMaskIntoConstraints = false
+        addSubview(scrollView)
+        scrollView.addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 32),
+
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            stackView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            stackView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
+        ])
+
+        for group in groups {
+            stackView.addArrangedSubview(makeBubble(for: group))
+        }
+    }
+
+    private func makeBubble(for group: BoostGroup) -> UIView {
+        let container = UIView()
+        container.backgroundColor = .tertiarySystemGroupedBackground
+        container.layer.cornerRadius = 13
+        container.layer.cornerCurve = .continuous
+        container.layer.borderWidth = 1.0 / UIScreen.main.scale
+        container.layer.borderColor = UIColor.separator.withAlphaComponent(0.35).cgColor
+        container.translatesAutoresizingMaskIntoConstraints = false
+
+        let iconContainer = UIView()
+        iconContainer.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.14)
+        iconContainer.layer.cornerRadius = 10
+        iconContainer.layer.cornerCurve = .continuous
+        iconContainer.translatesAutoresizingMaskIntoConstraints = false
+
+        let iconView = UIImageView(image: PostNativeCell.boostIconImage)
+        iconView.tintColor = .systemBlue
+        iconView.contentMode = .scaleAspectFit
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+
+        let avatarView = UIImageView()
+        avatarView.contentMode = .scaleAspectFill
+        avatarView.clipsToBounds = true
+        avatarView.layer.cornerRadius = 10
+        avatarView.backgroundColor = .secondarySystemFill
+        avatarView.translatesAutoresizingMaskIntoConstraints = false
+
+        AvatarImageLoader.setImage(
+            on: avatarView,
+            url: avatarURL(for: group.boosts.first?.user.avatarTemplate),
+            placeholder: UIImage(systemName: "person.crop.circle.fill")
+        )
+
+        let titleLabel = UILabel()
+        titleLabel.text = group.displayText.isEmpty ? String(localized: "post.boost") : group.displayText
+        titleLabel.font = .systemFont(ofSize: 12)
+        titleLabel.textColor = .label
+        titleLabel.numberOfLines = 1
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let countLabel = UILabel()
+        countLabel.text = "\(group.boosts.count)"
+        countLabel.font = .monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+        countLabel.textColor = .white
+        countLabel.textAlignment = .center
+        countLabel.backgroundColor = .systemBlue
+        countLabel.layer.cornerRadius = 8
+        countLabel.clipsToBounds = true
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        container.addSubview(iconContainer)
+        iconContainer.addSubview(iconView)
+        container.addSubview(avatarView)
+        container.addSubview(titleLabel)
+
+        NSLayoutConstraint.activate([
+            container.heightAnchor.constraint(equalToConstant: 28),
+
+            iconContainer.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+            iconContainer.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            iconContainer.widthAnchor.constraint(equalToConstant: 20),
+            iconContainer.heightAnchor.constraint(equalToConstant: 20),
+
+            iconView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+            iconView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 12),
+            iconView.heightAnchor.constraint(equalToConstant: 12),
+
+            avatarView.leadingAnchor.constraint(equalTo: iconContainer.trailingAnchor, constant: 4),
+            avatarView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            avatarView.widthAnchor.constraint(equalToConstant: 20),
+            avatarView.heightAnchor.constraint(equalToConstant: 20),
+
+            titleLabel.leadingAnchor.constraint(equalTo: avatarView.trailingAnchor, constant: 6),
+            titleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            titleLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 180),
+        ])
+
+        if group.boosts.count > 1 {
+            container.addSubview(countLabel)
+            NSLayoutConstraint.activate([
+                countLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 6),
+                countLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -7),
+                countLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 18),
+                countLabel.heightAnchor.constraint(equalToConstant: 18),
+            ])
+        } else {
+            titleLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8).isActive = true
+        }
+
+        return container
+    }
+
+    private func avatarURL(for template: String?) -> URL? {
+        AvatarImageLoader.url(from: template, baseURL: baseURL, size: 48)
+    }
+
+    private static func makeGroups(from boosts: [DiscourseTopicDetail.Boost]) -> [BoostGroup] {
+        var seenIds = Set<Int>()
+        var order: [String] = []
+        var grouped: [String: [DiscourseTopicDetail.Boost]] = [:]
+        var displayTextByKey: [String: String] = [:]
+
+        for boost in boosts {
+            guard seenIds.insert(boost.id).inserted else { continue }
+            let displayText = plainText(from: boost.cooked)
+            let key = displayText.isEmpty
+                ? boost.cooked.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression).trimmingCharacters(in: .whitespacesAndNewlines)
+                : displayText.lowercased()
+            guard !key.isEmpty else { continue }
+            if grouped[key] == nil {
+                order.append(key)
+                grouped[key] = []
+                displayTextByKey[key] = displayText
+            }
+            grouped[key]?.append(boost)
+        }
+
+        return order.compactMap { key in
+            guard let boosts = grouped[key], !boosts.isEmpty else { return nil }
+            return BoostGroup(displayText: displayTextByKey[key] ?? "", boosts: boosts)
+        }
+    }
+
+    private static func plainText(from html: String) -> String {
+        var text = html.replacingOccurrences(
+            of: "<img[^>]*(?:title|alt)=\"([^\"]+)\"[^>]*>",
+            with: " $1 ",
+            options: .regularExpression
+        )
+        text = text.replacingOccurrences(of: "<br\\s*/?>", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "</(p|div|li|blockquote)>", with: " ", options: .regularExpression)
+        text = text.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
+
+        let decoded: String
+        if let data = text.data(using: .utf8),
+           let attributed = try? NSAttributedString(
+               data: data,
+               options: [
+                   .documentType: NSAttributedString.DocumentType.html,
+                   .characterEncoding: String.Encoding.utf8.rawValue,
+               ],
+               documentAttributes: nil
+           ) {
+            decoded = attributed.string
+        } else {
+            decoded = text
+        }
+
+        return decoded.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+private struct BoostGroup {
+    let displayText: String
+    let boosts: [DiscourseTopicDetail.Boost]
 }

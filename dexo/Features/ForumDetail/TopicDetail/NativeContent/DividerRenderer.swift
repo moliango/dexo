@@ -12,16 +12,16 @@ enum DividerRenderer: BlockRenderer {
         container.translatesAutoresizingMaskIntoConstraints = false
 
         let line = UIView()
-        line.backgroundColor = .separator
+        line.backgroundColor = UIColor.separator.withAlphaComponent(0.35)
         line.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(line)
 
         NSLayoutConstraint.activate([
-            line.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            line.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            line.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 28),
+            line.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -28),
             line.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             line.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
-            container.heightAnchor.constraint(equalToConstant: 16),
+            container.heightAnchor.constraint(equalToConstant: 24),
         ])
 
         return container

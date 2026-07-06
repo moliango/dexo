@@ -6,18 +6,17 @@ struct DiscourseTopicDetail: Decodable {
     let fancyTitle: String?
     let postsCount: Int
     let replyCount: Int
+    let views: Int
     let categoryId: Int?
     let createdAt: String
     let tags: [Tag]
     var postStream: PostStream
     let validReactions: [String]
-    /// Highest post number the authenticated user has read in this topic.
-    /// `nil` for anonymous fetches. Used by the jump-to-floor sheet to offer a
-    /// "first unread" shortcut.
-    let lastReadPostNumber: Int?
+    let bookmarked: Bool
+    let bookmarkId: Int?
 
     enum CodingKeys: String, CodingKey {
-        case id, title, tags
+        case id, title, tags, bookmarked, views
         case fancyTitle = "fancy_title"
         case postsCount = "posts_count"
         case replyCount = "reply_count"
@@ -25,52 +24,24 @@ struct DiscourseTopicDetail: Decodable {
         case createdAt = "created_at"
         case postStream = "post_stream"
         case validReactions = "valid_reactions"
-        case lastReadPostNumber = "last_read_post_number"
+        case bookmarkId = "bookmark_id"
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(Int.self, forKey: .id)
         title = try container.decode(String.self, forKey: .title)
-        fancyTitle = (try? container.decodeIfPresent(String.self, forKey: .fancyTitle))?.decodingHTMLEntities()
+        fancyTitle = try? container.decodeIfPresent(String.self, forKey: .fancyTitle)
         postsCount = try container.decode(Int.self, forKey: .postsCount)
         replyCount = try container.decode(Int.self, forKey: .replyCount)
+        views = container.decodeLossyInt(forKey: .views) ?? 0
         categoryId = try? container.decodeIfPresent(Int.self, forKey: .categoryId)
         createdAt = try container.decode(String.self, forKey: .createdAt)
         tags = (try? container.decodeIfPresent([Tag].self, forKey: .tags)) ?? []
         postStream = try container.decode(PostStream.self, forKey: .postStream)
         validReactions = (try? container.decodeIfPresent([String].self, forKey: .validReactions)) ?? []
-        lastReadPostNumber = try? container.decodeIfPresent(Int.self, forKey: .lastReadPostNumber)
-    }
-
-    /// Memberwise initializer used to synthesize a `DiscourseTopicDetail` from
-    /// the nested-view response. Kept alongside the decoder init so existing
-    /// code that depends on the topic shape (tags, validReactions, etc.) keeps
-    /// working in tree mode.
-    init(
-        id: Int,
-        title: String,
-        fancyTitle: String?,
-        postsCount: Int,
-        replyCount: Int,
-        categoryId: Int?,
-        createdAt: String,
-        tags: [Tag],
-        postStream: PostStream,
-        validReactions: [String],
-        lastReadPostNumber: Int?
-    ) {
-        self.id = id
-        self.title = title
-        self.fancyTitle = fancyTitle
-        self.postsCount = postsCount
-        self.replyCount = replyCount
-        self.categoryId = categoryId
-        self.createdAt = createdAt
-        self.tags = tags
-        self.postStream = postStream
-        self.validReactions = validReactions
-        self.lastReadPostNumber = lastReadPostNumber
+        bookmarked = (try? container.decodeIfPresent(Bool.self, forKey: .bookmarked)) ?? false
+        bookmarkId = try? container.decodeIfPresent(Int.self, forKey: .bookmarkId)
     }
 
     struct PostStream: Decodable {
@@ -97,116 +68,90 @@ struct DiscourseTopicDetail: Decodable {
     struct Reaction: Decodable {
         let id: String
         let type: String
-        /// Present in the post's `reactions` array; absent in `current_user_reaction`.
-        let count: Int?
-        /// Only meaningful on `current_user_reaction` (whether the user can still toggle off).
-        let canUndo: Bool?
+        let count: Int
+    }
+
+    struct LinkCount: Decodable, Hashable {
+        let url: String
+        let title: String?
+        let clicks: Int
+        let internalLink: Bool
+        let reflection: Bool
 
         enum CodingKeys: String, CodingKey {
-            case id, type, count
-            case canUndo = "can_undo"
+            case url, title, clicks, reflection
+            case internalLink = "internal"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            url = (try? container.decodeIfPresent(String.self, forKey: .url)) ?? ""
+            title = (try? container.decodeIfPresent(String.self, forKey: .title))
+                .flatMap { $0.isEmpty ? nil : $0 }
+            clicks = container.decodeLossyInt(forKey: .clicks) ?? 0
+            internalLink = (try? container.decodeIfPresent(Bool.self, forKey: .internalLink)) ?? false
+            reflection = (try? container.decodeIfPresent(Bool.self, forKey: .reflection)) ?? false
         }
     }
 
-    /// One entry in a post's `actions_summary` array. id 2 = "like" (PostAction).
-    struct ActionSummary: Decodable {
-        let id: Int
-        let count: Int?
-        let acted: Bool?
-        let canUndo: Bool?
-        let canAct: Bool?
-
-        enum CodingKeys: String, CodingKey {
-            case id, count, acted
-            case canUndo = "can_undo"
-            case canAct = "can_act"
-        }
-    }
-
-    struct BoostUser: Decodable, Sendable {
+    struct BoostUser: Decodable, Hashable {
         let id: Int
         let username: String
         let name: String?
         let avatarTemplate: String?
-//        let animatedAvatar: String?
 
         enum CodingKeys: String, CodingKey {
             case id, username, name
             case avatarTemplate = "avatar_template"
-//            case animatedAvatar = "animated_avatar"
-        }
-    }
-
-    struct Poll: Decodable {
-        let name: String
-        let type: String          // "regular" or "multiple"
-        let status: String        // "open" or "closed"
-        let isPublic: Bool
-        let results: String       // "always", "on_vote", "on_close", "staff_only"
-        let min: Int?
-        let max: Int?
-        let options: [PollOption]
-        let voters: Int
-        let chartType: String?
-        let title: String?
-
-        enum CodingKeys: String, CodingKey {
-            case name, type, status, results, min, max, options, voters, title
-            case isPublic = "public"
-            case chartType = "chart_type"
         }
 
-        // Custom init so a missing optional-ish field (type / status / results /
-        // public / voters) doesn't silently drop the entire post.polls array
-        // via `(try? decodeIfPresent([Poll].self, ...)) ?? []`. Only `name` and
-        // `options` are truly required to render.
         init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            name = try c.decode(String.self, forKey: .name)
-            options = (try? c.decode([PollOption].self, forKey: .options)) ?? []
-            type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? "regular"
-            status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? "open"
-            isPublic = (try? c.decodeIfPresent(Bool.self, forKey: .isPublic)) ?? false
-            results = (try? c.decodeIfPresent(String.self, forKey: .results)) ?? "always"
-            min = try? c.decodeIfPresent(Int.self, forKey: .min)
-            max = try? c.decodeIfPresent(Int.self, forKey: .max)
-            voters = (try? c.decodeIfPresent(Int.self, forKey: .voters)) ?? 0
-            chartType = try? c.decodeIfPresent(String.self, forKey: .chartType)
-            title = try? c.decodeIfPresent(String.self, forKey: .title)
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = container.decodeLossyInt(forKey: .id) ?? 0
+            username = (try? container.decodeIfPresent(String.self, forKey: .username)) ?? ""
+            name = (try? container.decodeIfPresent(String.self, forKey: .name))
+                .flatMap { $0.isEmpty ? nil : $0 }
+            avatarTemplate = (try? container.decodeIfPresent(String.self, forKey: .avatarTemplate))
+                .flatMap { $0.isEmpty ? nil : $0 }
+        }
+
+        init(id: Int, username: String, name: String?, avatarTemplate: String?) {
+            self.id = id
+            self.username = username
+            self.name = name
+            self.avatarTemplate = avatarTemplate
         }
     }
 
-    struct PollOption: Decodable {
-        let id: String
-        let html: String
-        let votes: Int
-
-        enum CodingKeys: String, CodingKey {
-            case id, html, votes
-        }
-
-        // Number-type polls and pre-vote `results: "on_close"` responses omit
-        // the `votes` field entirely. Default to 0 so the whole poll decode
-        // doesn't fall over and leave `post.polls` empty.
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            id = try c.decode(String.self, forKey: .id)
-            html = try c.decode(String.self, forKey: .html)
-            votes = (try? c.decodeIfPresent(Int.self, forKey: .votes)) ?? 0
-        }
-    }
-
-    struct Boost: Decodable, Identifiable, Sendable {
+    struct Boost: Decodable, Identifiable, Hashable {
         let id: Int
         let cooked: String
-        let canDelete: Bool?
-        let canFlag: Bool
         let user: BoostUser
+        let canDelete: Bool
+        let canFlag: Bool
 
         enum CodingKeys: String, CodingKey {
             case id, cooked, user
             case canDelete = "can_delete"
             case canFlag = "can_flag"
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = container.decodeLossyInt(forKey: .id) ?? 0
+            cooked = (try? container.decodeIfPresent(String.self, forKey: .cooked)) ?? ""
+            user = (try? container.decodeIfPresent(BoostUser.self, forKey: .user))
+                ?? BoostUser(id: 0, username: "", name: nil, avatarTemplate: nil)
+            canDelete = (try? container.decodeIfPresent(Bool.self, forKey: .canDelete)) ?? false
+            canFlag = (try? container.decodeIfPresent(Bool.self, forKey: .canFlag)) ?? false
+        }
+
+        init(id: Int, cooked: String, user: BoostUser, canDelete: Bool, canFlag: Bool) {
+            self.id = id
+            self.cooked = cooked
+            self.user = user
+            self.canDelete = canDelete
+            self.canFlag = canFlag
         }
     }
 
@@ -217,7 +162,6 @@ struct DiscourseTopicDetail: Decodable {
         let avatarTemplate: String?
         let createdAt: String
         let cooked: String
-        let raw: String?
         let postNumber: Int
         let replyCount: Int
         let replyToPostNumber: Int?
@@ -226,49 +170,18 @@ struct DiscourseTopicDetail: Decodable {
         let userTitle: String?
         let flairUrl: String?
         let flairBgColor: String?
-        let bookmarked: Bool
-        let bookmarkId: Int?
-        let reactions: [Reaction]
-        let reactionUsersCount: Int
-        let currentUserReaction: Reaction?
-        let currentUserUsedMainReaction: Bool
-        let actionsSummary: [ActionSummary]
-
-        /// Standard Discourse "like" PostAction state (id == 2 in actions_summary).
-        var likeAction: ActionSummary? { actionsSummary.first(where: { $0.id == 2 }) }
-        var isLikedByCurrentUser: Bool { likeAction?.acted == true }
-        var likeCount: Int { likeAction?.count ?? 0 }
-        /// Whether the current user can flag/report this post (ids 3,4,7,8).
-        var canFlag: Bool { actionsSummary.contains { [3, 4, 7, 8].contains($0.id) && $0.canAct == true } }
+        var bookmarked: Bool
+        var bookmarkId: Int?
+        var reactions: [Reaction]
+        var reactionUsersCount: Int
+        var currentUserReaction: Reaction?
+        var currentUserUsedMainReaction: Bool
+        let linkCounts: [LinkCount]
         var boosts: [Boost]
         var canBoost: Bool
-        var polls: [Poll]
-        var pollsVotes: [String: [String]]
-        /// Populated only when this post was decoded from the `/n/...` nested
-        /// view endpoint; flat-stream fetches leave it nil. The view-model
-        /// walks this to build its DFS render order without having to infer
-        /// parent/child links from `replyToPostNumber`.
-        var children: [Post]?
-        /// Number of *direct* replies this post has on the server. In the
-        /// nested view the server inlines at most three children per node, so
-        /// `directReplyCount > (children?.count ?? 0)` signals there are more
-        /// direct replies to fetch via the `/n/.../children/{n}.json` endpoint.
-        /// The view-model uses the gap to render a "view N more replies" row.
-        var directReplyCount: Int
-        /// Total descendants (direct + indirect) under this post per the
-        /// server. Decoded for completeness / future use; the view-model keys
-        /// the "view more" affordance off `directReplyCount`.
-        let totalDescendantCount: Int
-        /// True for placeholder entries the nested-replies endpoint inserts
-        /// in place of deleted posts. These have empty `cooked`, no author,
-        /// and the only meaningful fields are `post_number` + the tree
-        /// structure on `children`. The cell renders them as a slim
-        /// "(deleted)" marker so connector lines stay intact without
-        /// claiming a real author / content.
-        let deletedPostPlaceholder: Bool
 
         enum CodingKeys: String, CodingKey {
-            case id, name, username, cooked, raw
+            case id, name, username, cooked
             case avatarTemplate = "avatar_template"
             case createdAt = "created_at"
             case postNumber = "post_number"
@@ -285,33 +198,22 @@ struct DiscourseTopicDetail: Decodable {
             case reactionUsersCount = "reaction_users_count"
             case currentUserReaction = "current_user_reaction"
             case currentUserUsedMainReaction = "current_user_used_main_reaction"
-            case actionsSummary = "actions_summary"
+            case linkCounts = "link_counts"
             case boosts
             case canBoost = "can_boost"
-            case polls
-            case pollsVotes = "polls_votes"
-            case children
-            case directReplyCount = "direct_reply_count"
-            case totalDescendantCount = "total_descendant_count"
-            case deletedPostPlaceholder = "deleted_post_placeholder"
         }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(Int.self, forKey: .id)
-            // Some nested-replies sorts (new/old) include anonymized or
-            // deleted authors with the `username` key omitted entirely. Don't
-            // hard-fail the whole tree decode in that case — fall back to a
-            // placeholder so the post still renders.
-            username = (try? container.decodeIfPresent(String.self, forKey: .username)) ?? ""
+            username = try container.decode(String.self, forKey: .username)
             name = (try? container.decodeIfPresent(String.self, forKey: .name))
-                .flatMap { $0.isEmpty ? nil : $0 } ?? (username.isEmpty ? nil : username)
-            avatarTemplate = try? container.decodeIfPresent(String.self, forKey: .avatarTemplate)
-            createdAt = (try? container.decodeIfPresent(String.self, forKey: .createdAt)) ?? ""
-            cooked = (try? container.decodeIfPresent(String.self, forKey: .cooked)) ?? ""
-            raw = try? container.decodeIfPresent(String.self, forKey: .raw)
-            postNumber = (try? container.decodeIfPresent(Int.self, forKey: .postNumber)) ?? 0
-            replyCount = (try? container.decodeIfPresent(Int.self, forKey: .replyCount)) ?? 0
+                .flatMap { $0.isEmpty ? nil : $0 } ?? username
+            avatarTemplate = try container.decodeIfPresent(String.self, forKey: .avatarTemplate)
+            createdAt = try container.decode(String.self, forKey: .createdAt)
+            cooked = try container.decode(String.self, forKey: .cooked)
+            postNumber = try container.decode(Int.self, forKey: .postNumber)
+            replyCount = try container.decode(Int.self, forKey: .replyCount)
             replyToPostNumber = try? container.decodeIfPresent(Int.self, forKey: .replyToPostNumber)
             replyToUser = try? container.decodeIfPresent(ReplyToUser.self, forKey: .replyToUser)
             actionCode = try? container.decodeIfPresent(String.self, forKey: .actionCode)
@@ -324,136 +226,25 @@ struct DiscourseTopicDetail: Decodable {
             reactionUsersCount = (try? container.decodeIfPresent(Int.self, forKey: .reactionUsersCount)) ?? 0
             currentUserReaction = try? container.decodeIfPresent(Reaction.self, forKey: .currentUserReaction)
             currentUserUsedMainReaction = (try? container.decodeIfPresent(Bool.self, forKey: .currentUserUsedMainReaction)) ?? false
-            actionsSummary = (try? container.decodeIfPresent([ActionSummary].self, forKey: .actionsSummary)) ?? []
+            linkCounts = (try? container.decodeIfPresent([LinkCount].self, forKey: .linkCounts)) ?? []
             boosts = (try? container.decodeIfPresent([Boost].self, forKey: .boosts)) ?? []
             canBoost = (try? container.decodeIfPresent(Bool.self, forKey: .canBoost)) ?? false
-            polls = (try? container.decodeIfPresent([Poll].self, forKey: .polls)) ?? []
-            pollsVotes = (try? container.decodeIfPresent([String: [String]].self, forKey: .pollsVotes)) ?? [:]
-            children = try? container.decodeIfPresent([Post].self, forKey: .children)
-            directReplyCount = (try? container.decodeIfPresent(Int.self, forKey: .directReplyCount)) ?? 0
-            totalDescendantCount = (try? container.decodeIfPresent(Int.self, forKey: .totalDescendantCount)) ?? 0
-            deletedPostPlaceholder = (try? container.decodeIfPresent(Bool.self, forKey: .deletedPostPlaceholder)) ?? false
         }
     }
 }
 
-/// Response shape from `GET /n/{slug}/{id}.json` — Discourse's nested-replies
-/// view. `roots` holds the top-level replies (each with its full subtree on
-/// `children`); the OP itself is delivered separately on `op_post`. Pagination
-/// applies to the number of *root* replies returned, signalled by
-/// `hasMoreRoots` + `page`.
-///
-/// `topic` and `opPost` are only sent on the first page; subsequent pages drop
-/// them and just deliver more `roots` — both are optional here so paginated
-/// requests still decode.
-struct DiscourseNestedTopicResponse: Decodable {
-    let roots: [DiscourseTopicDetail.Post]
-    let hasMoreRoots: Bool
-    let page: Int
-    let topic: NestedTopicMeta?
-    let opPost: DiscourseTopicDetail.Post?
-    let sort: String?
-    /// Set when the server returned the standard flat post-stream layout
-    /// in response to `/n/.../json` — e.g. private messages, which bypass
-    /// the nested view. The caller should fall back to standard topic
-    /// rendering when this is non-nil.
-    let flatTopic: DiscourseTopicDetail?
-
-    enum CodingKeys: String, CodingKey {
-        case roots
-        case hasMoreRoots = "has_more_roots"
-        case page
-        case topic
-        case opPost = "op_post"
-        case sort
-        case postStream = "post_stream"
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        if c.contains(.roots) {
-            roots = (try? c.decode([DiscourseTopicDetail.Post].self, forKey: .roots)) ?? []
-            hasMoreRoots = (try? c.decodeIfPresent(Bool.self, forKey: .hasMoreRoots)) ?? false
-            page = (try? c.decodeIfPresent(Int.self, forKey: .page)) ?? 0
-            topic = try? c.decodeIfPresent(NestedTopicMeta.self, forKey: .topic)
-            opPost = try? c.decodeIfPresent(DiscourseTopicDetail.Post.self, forKey: .opPost)
-            sort = try? c.decodeIfPresent(String.self, forKey: .sort)
-            flatTopic = nil
-        } else if c.contains(.postStream) {
-            // Server returned the standard topic layout — decode it off the
-            // same payload so the caller can fall back without a second
-            // round-trip.
-            roots = []
-            hasMoreRoots = false
-            page = 0
-            topic = nil
-            opPost = nil
-            sort = nil
-            flatTopic = try DiscourseTopicDetail(from: decoder)
-        } else {
-            throw DecodingError.dataCorruptedError(
-                forKey: .roots,
-                in: c,
-                debugDescription: "Nested response missing both `roots` and `post_stream`"
-            )
+private extension KeyedDecodingContainer {
+    func decodeLossyInt(forKey key: Key) -> Int? {
+        if let value = try? decodeIfPresent(Int.self, forKey: key) {
+            return value
         }
-    }
-
-    struct NestedTopicMeta: Decodable {
-        let id: Int
-        let title: String
-        let fancyTitle: String?
-        let slug: String?
-        let postsCount: Int
-        let replyCount: Int
-        let categoryId: Int?
-        let createdAt: String?
-        let tags: [DiscourseTopicDetail.Tag]
-
-        enum CodingKeys: String, CodingKey {
-            case id, title, slug, tags
-            case fancyTitle = "fancy_title"
-            case postsCount = "posts_count"
-            case replyCount = "reply_count"
-            case categoryId = "category_id"
-            case createdAt = "created_at"
+        if let value = try? decodeIfPresent(Double.self, forKey: key) {
+            return Int(value)
         }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            id = try container.decode(Int.self, forKey: .id)
-            title = try container.decode(String.self, forKey: .title)
-            fancyTitle = try? container.decodeIfPresent(String.self, forKey: .fancyTitle)
-            slug = try? container.decodeIfPresent(String.self, forKey: .slug)
-            postsCount = (try? container.decodeIfPresent(Int.self, forKey: .postsCount)) ?? 0
-            replyCount = (try? container.decodeIfPresent(Int.self, forKey: .replyCount)) ?? 0
-            categoryId = try? container.decodeIfPresent(Int.self, forKey: .categoryId)
-            createdAt = try? container.decodeIfPresent(String.self, forKey: .createdAt)
-            tags = (try? container.decodeIfPresent([DiscourseTopicDetail.Tag].self, forKey: .tags)) ?? []
+        if let value = try? decodeIfPresent(String.self, forKey: key) {
+            return Int(value)
         }
-    }
-}
-
-/// Response shape from `GET /n/{slug}/{topicId}/children/{postNumber}.json` —
-/// the full direct-reply list under a single post in the nested view. Each
-/// entry carries its own (inlined) subtree just like the roots in
-/// `DiscourseNestedTopicResponse`. `hasMore` paginates the direct children.
-struct DiscourseNestedChildrenResponse: Decodable {
-    let children: [DiscourseTopicDetail.Post]
-    let hasMore: Bool
-    let page: Int
-
-    enum CodingKeys: String, CodingKey {
-        case children
-        case hasMore = "has_more"
-        case page
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        children = (try? c.decode([DiscourseTopicDetail.Post].self, forKey: .children)) ?? []
-        hasMore = (try? c.decodeIfPresent(Bool.self, forKey: .hasMore)) ?? false
-        page = (try? c.decodeIfPresent(Int.self, forKey: .page)) ?? 0
+        return nil
     }
 }
 

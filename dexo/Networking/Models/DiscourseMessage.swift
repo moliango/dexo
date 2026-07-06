@@ -35,11 +35,13 @@ struct DiscourseSiteInfo: Decodable {
     let defaultArchetype: String?
     let notificationTypes: [String: Int]?
     let customEmoji: [DiscourseCustomEmoji]?
+    let categories: [DiscourseCategory]?
 
     enum CodingKeys: String, CodingKey {
         case defaultArchetype = "default_archetype"
         case notificationTypes = "notification_types"
         case customEmoji = "custom_emoji"
+        case categories
     }
 }
 

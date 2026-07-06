@@ -1,9 +1,6 @@
 import Foundation
 
-import Perception
-
-@Perceptible
-final class CategoriesViewModel {
+final class CategoriesViewModel: DexoObservableObject {
     var categories: [DiscourseCategory] = []
     var isLoading = false
     var errorMessage: String?
@@ -19,9 +16,16 @@ final class CategoriesViewModel {
         isLoading = true
         errorMessage = nil
         requiresLogin = false
+        notifyChanged()
         do {
-            let result = try await api.fetchCategories()
-            categories = result.categoryList.categories.filter { $0.parentCategoryId == nil }
+            let siteCategories = (try? await api.fetchSiteCategories()) ?? []
+            if !siteCategories.isEmpty {
+                categories = DiscourseCategory.hierarchy(fromFlat: siteCategories.filter { $0.id != 1 })
+            } else {
+                let result = try await api.fetchCategories()
+                categories = DiscourseCategory.normalizedTree(fromNested: result.categoryList.categories)
+                    .filter { $0.parentCategoryId == nil }
+            }
         } catch {
             if let apiError = error as? DiscourseAPIError, apiError.isNotLoggedIn || apiError.isForbidden {
                 requiresLogin = true
@@ -29,5 +33,6 @@ final class CategoriesViewModel {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        notifyChanged()
     }
 }

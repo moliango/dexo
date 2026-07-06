@@ -7,7 +7,8 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = (scene as? UIWindowScene) else { return }
 
         let window = UIWindow(windowScene: windowScene)
-        window.rootViewController = MainTabBarController()
+        let defaultForum = DatabaseManager.shared.defaultForum()
+        window.rootViewController = ForumContainerViewController(forum: defaultForum, showsDismissButton: false)
         window.overrideUserInterfaceStyle = AppSettings.shared.appearanceMode.userInterfaceStyle
         ThemeManager.shared.apply(to: window)
         window.makeKeyAndVisible()
@@ -19,13 +20,22 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {}
-    func sceneDidBecomeActive(_ scene: UIScene) {}
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        refreshWebSessionAfterForeground(reason: "scene_did_become_active")
+    }
     func sceneWillResignActive(_ scene: UIScene) {}
     func sceneWillEnterForeground(_ scene: UIScene) {
 //        ProxyManager.shared.start()
+        refreshWebSessionAfterForeground(reason: "scene_will_enter_foreground")
     }
 
     func sceneDidEnterBackground(_ scene: UIScene) {
 //        ProxyManager.shared.stop()
+    }
+
+    private func refreshWebSessionAfterForeground(reason: String) {
+        let forum = DatabaseManager.shared.defaultForum()
+        guard AuthManager.shared.hasWebSession(for: forum.baseURL) else { return }
+        WebSessionRefreshService.shared.ensureInBackground(forum: forum, reason: reason)
     }
 }

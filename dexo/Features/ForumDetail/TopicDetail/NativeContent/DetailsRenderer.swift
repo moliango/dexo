@@ -18,6 +18,7 @@ enum DetailsRenderer: BlockRenderer {
 private class DetailsCardView: UIView {
     private let chevron = UIImageView()
     private let headerView = UIView()
+    private let dividerView = UIView()
     private var contentStack: UIStackView?
     private var isExpanded = false
     private var headerBottomConstraint: NSLayoutConstraint!
@@ -32,8 +33,12 @@ private class DetailsCardView: UIView {
         self.delegate = delegate
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        backgroundColor = .secondarySystemBackground
-        layer.cornerRadius = 8
+        TopicDetailContentStyle.applySurface(
+            to: self,
+            backgroundColor: TopicDetailContentStyle.cardBackground,
+            cornerRadius: 14,
+            borderAlpha: 0.26
+        )
         clipsToBounds = true
 
         innerConfig = NativeRenderConfig(
@@ -42,14 +47,14 @@ private class DetailsCardView: UIView {
             linkColor: config.linkColor,
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
-            contentWidth: config.contentWidth - 24,
+            contentWidth: config.contentWidth - 32,
             baseURL: config.baseURL
         )
 
         // MARK: Header
 
         chevron.image = UIImage(systemName: "chevron.right")
-        chevron.tintColor = .secondaryLabel
+        chevron.tintColor = .systemBlue
         chevron.contentMode = .scaleAspectFit
         chevron.translatesAutoresizingMaskIntoConstraints = false
 
@@ -63,12 +68,24 @@ private class DetailsCardView: UIView {
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor
         )
-        summaryLabel.attributedText = summary.attributedString(config: summaryConfig)
+        let summaryText = NSMutableAttributedString(attributedString: summary.attributedString(config: summaryConfig))
+        if summaryText.length > 0 {
+            let style = NSMutableParagraphStyle()
+            style.lineSpacing = 2
+            summaryText.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: summaryText.length))
+        }
+        summaryLabel.attributedText = summaryText
 
         headerView.translatesAutoresizingMaskIntoConstraints = false
+        headerView.backgroundColor = TopicDetailContentStyle.mutedBackground
         headerView.addSubview(chevron)
         headerView.addSubview(summaryLabel)
         addSubview(headerView)
+
+        dividerView.translatesAutoresizingMaskIntoConstraints = false
+        dividerView.backgroundColor = UIColor.separator.withAlphaComponent(0.22)
+        dividerView.isHidden = true
+        addSubview(dividerView)
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(toggleExpanded))
         headerView.addGestureRecognizer(tap)
@@ -80,6 +97,11 @@ private class DetailsCardView: UIView {
             headerView.leadingAnchor.constraint(equalTo: leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: trailingAnchor),
             headerBottomConstraint,
+
+            dividerView.topAnchor.constraint(equalTo: headerView.bottomAnchor),
+            dividerView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            dividerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            dividerView.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
 
             chevron.widthAnchor.constraint(equalToConstant: 12),
             chevron.heightAnchor.constraint(equalToConstant: 12),
@@ -115,7 +137,7 @@ private class DetailsCardView: UIView {
                 }
 
                 NSLayoutConstraint.activate([
-                    stack.topAnchor.constraint(equalTo: headerView.bottomAnchor, constant: 4),
+                    stack.topAnchor.constraint(equalTo: dividerView.bottomAnchor, constant: 10),
                     stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
                     stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
                 ])
@@ -125,12 +147,14 @@ private class DetailsCardView: UIView {
             }
 
             contentStack?.isHidden = false
+            dividerView.isHidden = false
             headerBottomConstraint.isActive = false
             contentBottomConstraint?.isActive = true
         } else {
             contentBottomConstraint?.isActive = false
             headerBottomConstraint.isActive = true
             contentStack?.isHidden = true
+            dividerView.isHidden = true
         }
 
         chevron.transform = isExpanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity

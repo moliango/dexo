@@ -1,16 +1,12 @@
 import Foundation
 
-import Perception
-
-@Perceptible
-final class UserPostsViewModel {
+final class UserPostsViewModel: DexoObservableObject {
     enum Filter {
         case topics
         case posts
     }
 
     var searchResults: [DiscourseSearchResult.SearchPost] = []
-    private(set) var topicsById: [Int: DiscourseSearchResult.SearchTopic] = [:]
     var isLoading = false
     var canLoadMore = false
     var errorMessage: String?
@@ -30,22 +26,24 @@ final class UserPostsViewModel {
         isLoading = true
         errorMessage = nil
         currentPage = 0
+        notifyChanged()
 
         let query = buildQuery()
         do {
             let result = try await api.search(term: query, page: 0)
             searchResults = result.posts ?? []
-            topicsById = Self.buildTopicsMap(from: result)
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             errorMessage = error.localizedDescription
         }
         isLoading = false
+        notifyChanged()
     }
 
     func loadMore() async {
         guard canLoadMore, !isLoading else { return }
         isLoading = true
+        notifyChanged()
         let nextPage = currentPage + 1
         let query = buildQuery()
 
@@ -55,18 +53,13 @@ final class UserPostsViewModel {
             let existingIds = Set(searchResults.map(\.id))
             let filtered = newPosts.filter { !existingIds.contains($0.id) }
             searchResults.append(contentsOf: filtered)
-            topicsById.merge(Self.buildTopicsMap(from: result)) { _, new in new }
             currentPage = nextPage
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             canLoadMore = false
         }
         isLoading = false
-    }
-
-    private static func buildTopicsMap(from result: DiscourseSearchResult) -> [Int: DiscourseSearchResult.SearchTopic] {
-        guard let topics = result.topics else { return [:] }
-        return Dictionary(uniqueKeysWithValues: topics.map { ($0.id, $0) })
+        notifyChanged()
     }
 
     private func buildQuery() -> String {

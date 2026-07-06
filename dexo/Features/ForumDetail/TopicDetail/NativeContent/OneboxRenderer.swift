@@ -41,11 +41,13 @@ final class OneboxCardView: UIView {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
-        backgroundColor = .secondarySystemBackground
-        layer.cornerRadius = 4
+        TopicDetailContentStyle.applySurface(
+            to: self,
+            backgroundColor: TopicDetailContentStyle.cardBackground,
+            cornerRadius: 14,
+            borderAlpha: 0.30
+        )
         clipsToBounds = true
-        layer.borderWidth = 1.0 / UIScreen.main.scale
-        layer.borderColor = UIColor.separator.cgColor
 
         // MARK: Header — favicon + domain
 
@@ -68,7 +70,7 @@ final class OneboxCardView: UIView {
         let faviconSize: CGFloat = 16
 
         if let faviconURL, let url = URL(string: faviconURL) {
-            faviconView.sd_setImage(with: url, context: ImageCacheManager.shared.contentContext)
+            faviconView.sd_setImage(with: url)
             headerStack.addArrangedSubview(faviconView)
             NSLayoutConstraint.activate([
                 faviconView.widthAnchor.constraint(equalToConstant: faviconSize),
@@ -79,7 +81,7 @@ final class OneboxCardView: UIView {
         // Domain label
         let domainLabel = UILabel()
         domainLabel.translatesAutoresizingMaskIntoConstraints = false
-        domainLabel.font = FontManager.shared.font(size: 12)
+        domainLabel.font = .systemFont(ofSize: 12, weight: .medium)
         domainLabel.textColor = .secondaryLabel
         if let sourceURL, let url = URL(string: sourceURL), let host = url.host {
             domainLabel.text = host
@@ -88,7 +90,7 @@ final class OneboxCardView: UIView {
 
         let headerSeparator = UIView()
         headerSeparator.translatesAutoresizingMaskIntoConstraints = false
-        headerSeparator.backgroundColor = .separator
+        headerSeparator.backgroundColor = UIColor.separator.withAlphaComponent(0.22)
         headerView.addSubview(headerSeparator)
 
         NSLayoutConstraint.activate([
@@ -96,13 +98,13 @@ final class OneboxCardView: UIView {
             headerView.leadingAnchor.constraint(equalTo: leadingAnchor),
             headerView.trailingAnchor.constraint(equalTo: trailingAnchor),
 
-            headerStack.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 8),
+            headerStack.topAnchor.constraint(equalTo: headerView.topAnchor, constant: 10),
             headerStack.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 12),
             headerStack.trailingAnchor.constraint(lessThanOrEqualTo: headerView.trailingAnchor, constant: -12),
-            headerStack.bottomAnchor.constraint(equalTo: headerSeparator.topAnchor, constant: -8),
+            headerStack.bottomAnchor.constraint(equalTo: headerSeparator.topAnchor, constant: -10),
 
-            headerSeparator.leadingAnchor.constraint(equalTo: headerView.leadingAnchor),
-            headerSeparator.trailingAnchor.constraint(equalTo: headerView.trailingAnchor),
+            headerSeparator.leadingAnchor.constraint(equalTo: headerView.leadingAnchor, constant: 12),
+            headerSeparator.trailingAnchor.constraint(equalTo: headerView.trailingAnchor, constant: -12),
             headerSeparator.bottomAnchor.constraint(equalTo: headerView.bottomAnchor),
             headerSeparator.heightAnchor.constraint(equalToConstant: 1.0 / UIScreen.main.scale),
         ])
@@ -122,19 +124,25 @@ final class OneboxCardView: UIView {
             bodyStack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
-        // Text area
+        let contentRow = UIStackView()
+        contentRow.axis = .horizontal
+        contentRow.spacing = 12
+        contentRow.alignment = .top
+        contentRow.translatesAutoresizingMaskIntoConstraints = false
+        contentRow.isLayoutMarginsRelativeArrangement = true
+        contentRow.layoutMargins = UIEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        bodyStack.addArrangedSubview(contentRow)
+
         let textStack = UIStackView()
         textStack.axis = .vertical
         textStack.spacing = 4
         textStack.translatesAutoresizingMaskIntoConstraints = false
-        textStack.isLayoutMarginsRelativeArrangement = true
-        textStack.layoutMargins = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
-        bodyStack.addArrangedSubview(textStack)
+        contentRow.addArrangedSubview(textStack)
 
         if let title, !title.isEmpty {
             let titleLabel = UILabel()
-            titleLabel.font = FontManager.shared.font(size: 14, weight: .medium)
-            titleLabel.textColor = .link
+            titleLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+            titleLabel.textColor = .label
             titleLabel.numberOfLines = 2
             titleLabel.text = title
             textStack.addArrangedSubview(titleLabel)
@@ -142,11 +150,19 @@ final class OneboxCardView: UIView {
 
         if let description, !description.isEmpty {
             let descLabel = UILabel()
-            descLabel.font = FontManager.shared.font(size: 13)
+            descLabel.font = .systemFont(ofSize: 13)
             descLabel.textColor = .secondaryLabel
             descLabel.numberOfLines = 3
             descLabel.text = description
             textStack.addArrangedSubview(descLabel)
+        }
+        if (title ?? "").isEmpty, (description ?? "").isEmpty, let sourceURL {
+            let fallbackLabel = UILabel()
+            fallbackLabel.font = .systemFont(ofSize: 13, weight: .medium)
+            fallbackLabel.textColor = .link
+            fallbackLabel.numberOfLines = 2
+            fallbackLabel.text = sourceURL
+            textStack.addArrangedSubview(fallbackLabel)
         }
 
         // Thumbnail image (only for actual content images, not favicons)
@@ -157,28 +173,14 @@ final class OneboxCardView: UIView {
             imageView.backgroundColor = .tertiarySystemFill
             imageView.layer.cornerRadius = 6
 
-            let imageWrapper = UIView()
-            imageWrapper.translatesAutoresizingMaskIntoConstraints = false
-            imageWrapper.addSubview(imageView)
-
-            let displayWidth = containerWidth - 24
-            let imageH: CGFloat
-            if let w = imageWidth, let h = imageHeight, w > 0 {
-                imageH = displayWidth * CGFloat(h) / CGFloat(w)
-            } else {
-                imageH = displayWidth * 9.0 / 16.0
-            }
-
+            contentRow.addArrangedSubview(imageView)
+            let thumbnailWidth = min(92, max(72, containerWidth * 0.24))
             NSLayoutConstraint.activate([
-                imageView.topAnchor.constraint(equalTo: imageWrapper.topAnchor),
-                imageView.leadingAnchor.constraint(equalTo: imageWrapper.leadingAnchor, constant: 12),
-                imageView.trailingAnchor.constraint(equalTo: imageWrapper.trailingAnchor, constant: -12),
-                imageView.bottomAnchor.constraint(equalTo: imageWrapper.bottomAnchor, constant: -12),
-                imageView.heightAnchor.constraint(equalToConstant: imageH),
+                imageView.widthAnchor.constraint(equalToConstant: thumbnailWidth),
+                imageView.heightAnchor.constraint(equalToConstant: 72),
             ])
 
-            bodyStack.addArrangedSubview(imageWrapper)
-            imageView.sd_setImage(with: url, placeholderImage: nil, options: [], context: ImageCacheManager.shared.contentContext, progress: nil) { [weak self] _, _, _, _ in
+            imageView.sd_setImage(with: url) { [weak self] _, _, _, _ in
                 self?.imageView.backgroundColor = .clear
             }
         }

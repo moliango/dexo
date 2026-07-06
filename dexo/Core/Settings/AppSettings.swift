@@ -1,9 +1,6 @@
 import UIKit
 
-import Perception
-
-@Perceptible
-final class AppSettings {
+final class AppSettings: DexoObservableObject {
     static let shared = AppSettings()
 
     private let defaults = UserDefaults.standard
@@ -37,6 +34,7 @@ final class AppSettings {
         set {
             defaults.set(newValue.rawValue, forKey: "appearanceMode")
             applyAppearance()
+            notifyChanged()
         }
     }
 
@@ -54,7 +52,10 @@ final class AppSettings {
 
     var autoOpenLastForum: Bool {
         get { defaults.bool(forKey: "autoOpenLastForum") }
-        set { defaults.set(newValue, forKey: "autoOpenLastForum") }
+        set {
+            defaults.set(newValue, forKey: "autoOpenLastForum")
+            notifyChanged()
+        }
     }
 
     var lastOpenedForumId: Int64? {
@@ -68,120 +69,146 @@ final class AppSettings {
             } else {
                 defaults.removeObject(forKey: "lastOpenedForumId")
             }
+            notifyChanged()
         }
     }
 
     var hasShownAutoOpenPrompt: Bool {
         get { defaults.bool(forKey: "hasShownAutoOpenPrompt") }
-        set { defaults.set(newValue, forKey: "hasShownAutoOpenPrompt") }
-    }
-
-    // MARK: - Theme
-
-    var selectedThemeId: String {
-        get { defaults.string(forKey: "selectedThemeId") ?? "default" }
-        set { defaults.set(newValue, forKey: "selectedThemeId") }
-    }
-
-    var customThemeSchemes: [CustomThemeScheme] {
-        get {
-            guard let data = defaults.data(forKey: "customThemeSchemes"),
-                  let schemes = try? JSONDecoder().decode([CustomThemeScheme].self, from: data)
-            else { return [] }
-            return schemes
-        }
         set {
-            if let data = try? JSONEncoder().encode(newValue) {
-                defaults.set(data, forKey: "customThemeSchemes")
-            }
+            defaults.set(newValue, forKey: "hasShownAutoOpenPrompt")
+            notifyChanged()
         }
     }
 
-    func customThemeScheme(id: String) -> CustomThemeScheme? {
-        customThemeSchemes.first { $0.id == id }
-    }
+    // MARK: - Reading
 
-    func saveCustomThemeScheme(_ scheme: CustomThemeScheme) {
-        var schemes = customThemeSchemes
-        if let idx = schemes.firstIndex(where: { $0.id == scheme.id }) {
-            schemes[idx] = scheme
-        } else {
-            schemes.append(scheme)
-        }
-        customThemeSchemes = schemes
-    }
-
-    func deleteCustomThemeScheme(id: String) {
-        var schemes = customThemeSchemes
-        schemes.removeAll { $0.id == id }
-        customThemeSchemes = schemes
-    }
-
-    // MARK: - Font Size
-
-    /// Whether to follow the system Dynamic Type setting.
-    var followSystemFontSize: Bool {
-        get {
-            // Default to true if key has never been set
-            if defaults.object(forKey: "followSystemFontSize") == nil { return true }
-            return defaults.bool(forKey: "followSystemFontSize")
-        }
-        set { defaults.set(newValue, forKey: "followSystemFontSize") }
-    }
-
-    /// Font size level: -3 … +4, where 0 is the default.
-    var fontSizeLevel: Int {
-        get { defaults.integer(forKey: "fontSizeLevel") }
-        set { defaults.set(newValue, forKey: "fontSizeLevel") }
-    }
-
-    /// Scale factor derived from the app-level font size setting.
-    var appFontScale: CGFloat {
-        switch fontSizeLevel {
-        case -3: return 0.82
-        case -2: return 0.88
-        case -1: return 0.94
-        case  0: return 1.0
-        case  1: return 1.08
-        case  2: return 1.16
-        case  3: return 1.25
-        case  4: return 1.35
-        default: return 1.0
+    var readingComfortMode: Bool {
+        get { defaults.bool(forKey: "readingComfortMode") }
+        set {
+            defaults.set(newValue, forKey: "readingComfortMode")
+            notifyChanged()
         }
     }
 
-    // MARK: - Boost Display
+    var hideScrollIndicators: Bool {
+        get { bool(forKey: "hideScrollIndicators", defaultValue: true) }
+        set {
+            defaults.set(newValue, forKey: "hideScrollIndicators")
+            notifyChanged()
+        }
+    }
 
-    enum BoostDisplayMode: Int, CaseIterable {
-        case danmaku = 0
-        case expand = 1
+    // MARK: - Bottom Bar
+
+    enum ForumDynamicTabItem: String, CaseIterable {
+        case history
+        case search
+        case notifications
+        case messages
+        case bookmarks
 
         var title: String {
             switch self {
-            case .expand: return String(localized: "settings.boost_display.expand")
-            case .danmaku: return String(localized: "settings.boost_display.danmaku")
+            case .history: return String(localized: "tab.history")
+            case .search: return String(localized: "search.title")
+            case .notifications: return String(localized: "tab.notifications")
+            case .messages: return String(localized: "tab.messages")
+            case .bookmarks: return String(localized: "me.bookmarks")
             }
+        }
+
+        var subtitle: String {
+            switch self {
+            case .history: return "查看已读和看过的话题"
+            case .search: return "搜索帖子和回复"
+            case .notifications: return "查看回复、点赞和系统通知"
+            case .messages: return "查看论坛私信"
+            case .bookmarks: return "查看已收藏内容"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .history: return "clock.arrow.circlepath"
+            case .search: return "magnifyingglass"
+            case .notifications: return "bell"
+            case .messages: return "envelope"
+            case .bookmarks: return "bookmark"
+            }
+        }
+
+        static func storedValue(_ rawValue: String) -> ForumDynamicTabItem? {
+            if rawValue == "categories" {
+                return .history
+            }
+            return ForumDynamicTabItem(rawValue: rawValue)
         }
     }
 
-    /// Whether the topic detail page should default to the indented tree
-    /// rendering. Persisted between launches so the user doesn't have to flip
-    /// the nav-bar toggle every time they open a topic.
-    var topicTreeMode: Bool {
-        get { defaults.bool(forKey: "topicTreeMode") }
-        set { defaults.set(newValue, forKey: "topicTreeMode") }
+    static let minimumConfiguredForumDynamicTabItems = 1
+    static let maximumConfiguredForumDynamicTabItems = 5
+    static let maximumVisibleForumDynamicTabItems = 3
+    static let defaultForumDynamicTabItems: [ForumDynamicTabItem] = [
+        .history,
+        .notifications,
+        .bookmarks,
+    ]
+
+    var bottomBarAutoHideEnabled: Bool {
+        get { bool(forKey: "bottomBarAutoHideEnabled", defaultValue: true) }
+        set {
+            defaults.set(newValue, forKey: "bottomBarAutoHideEnabled")
+            notifyChanged()
+        }
     }
 
-    /// Sort order for the nested tree endpoint. One of "top", "new", "old".
-    /// Persists the user's last choice across topic opens.
-    var topicTreeSort: String {
-        get { defaults.string(forKey: "topicTreeSort") ?? "top" }
-        set { defaults.set(newValue, forKey: "topicTreeSort") }
+    var forumDynamicTabItems: [ForumDynamicTabItem] {
+        get {
+            guard let rawValues = defaults.stringArray(forKey: "forumDynamicTabItemIds") else {
+                return Self.defaultForumDynamicTabItems
+            }
+            return Self.sanitizedForumDynamicTabItems(rawValues.compactMap(ForumDynamicTabItem.storedValue))
+        }
+        set {
+            let items = Self.sanitizedForumDynamicTabItems(newValue)
+            defaults.set(items.map(\.rawValue), forKey: "forumDynamicTabItemIds")
+            notifyChanged()
+        }
     }
 
-    var boostDisplayMode: BoostDisplayMode {
-        get { BoostDisplayMode(rawValue: defaults.integer(forKey: "boostDisplayMode")) ?? .danmaku }
-        set { defaults.set(newValue.rawValue, forKey: "boostDisplayMode") }
+    var forumVisibleDynamicTabItems: [ForumDynamicTabItem] {
+        Array(forumDynamicTabItems.prefix(Self.maximumVisibleForumDynamicTabItems))
+    }
+
+    func resetForumDynamicTabItems() {
+        forumDynamicTabItems = Self.defaultForumDynamicTabItems
+    }
+
+    // MARK: - Home
+
+    var homePinnedCategoryIds: [Int] {
+        get {
+            defaults.stringArray(forKey: "homePinnedCategoryIds")?
+                .compactMap(Int.init) ?? []
+        }
+        set {
+            let uniqueIds = Self.uniqueCategoryIds(newValue)
+            defaults.set(uniqueIds.map(String.init), forKey: "homePinnedCategoryIds")
+            notifyChanged()
+        }
+    }
+
+    func addHomePinnedCategoryId(_ categoryId: Int) {
+        var ids = homePinnedCategoryIds
+        guard !ids.contains(categoryId) else { return }
+        ids.append(categoryId)
+        homePinnedCategoryIds = ids
+    }
+
+    func removeHomePinnedCategoryId(_ categoryId: Int) {
+        let ids = homePinnedCategoryIds.filter { $0 != categoryId }
+        homePinnedCategoryIds = ids
     }
 
     // MARK: - DNS over HTTPS
@@ -192,6 +219,7 @@ final class AppSettings {
         case quad9 = 2
         case alidns = 3
         case custom = 4
+        case dnspod = 5
 
         var title: String {
             switch self {
@@ -200,33 +228,47 @@ final class AppSettings {
             case .quad9: return "Quad9 (9.9.9.9)"
             case .alidns: return "AliDNS (223.5.5.5)"
             case .custom: return String(localized: "doh.provider.custom")
+            case .dnspod: return "DNSPod (doh.pub)"
             }
         }
 
         var url: String {
             switch self {
-            case .cloudflare: return "https://1.1.1.1/dns-query"
-            case .google: return "https://8.8.8.8/resolve"
-            case .quad9: return "https://9.9.9.9:5053/dns-query"
-            case .alidns: return "https://dns.alidns.com/resolve"
+            case .cloudflare: return "https://cloudflare-dns.com/dns-query"
+            case .google: return "https://dns.google/dns-query"
+            case .quad9: return "https://dns.quad9.net/dns-query"
+            case .alidns: return "https://dns.alidns.com/dns-query"
             case .custom: return ""
+            case .dnspod: return "https://doh.pub/dns-query"
             }
         }
     }
 
     var dohEnabled: Bool {
         get { defaults.bool(forKey: "dohEnabled") }
-        set { defaults.set(newValue, forKey: "dohEnabled") }
+        set {
+            defaults.set(newValue, forKey: "dohEnabled")
+            notifyChanged()
+        }
     }
 
     var dohProvider: DoHProvider {
-        get { DoHProvider(rawValue: defaults.integer(forKey: "dohProvider")) ?? .cloudflare }
-        set { defaults.set(newValue.rawValue, forKey: "dohProvider") }
+        get {
+            guard defaults.object(forKey: "dohProvider") != nil else { return .alidns }
+            return DoHProvider(rawValue: defaults.integer(forKey: "dohProvider")) ?? .alidns
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: "dohProvider")
+            notifyChanged()
+        }
     }
 
     var dohCustomURL: String {
         get { defaults.string(forKey: "dohCustomURL") ?? "" }
-        set { defaults.set(newValue, forKey: "dohCustomURL") }
+        set {
+            defaults.set(newValue, forKey: "dohCustomURL")
+            notifyChanged()
+        }
     }
 
     var dohServerURL: String {
@@ -234,5 +276,25 @@ final class AppSettings {
             return dohCustomURL
         }
         return dohProvider.url
+    }
+
+    private func bool(forKey key: String, defaultValue: Bool) -> Bool {
+        guard defaults.object(forKey: key) != nil else { return defaultValue }
+        return defaults.bool(forKey: key)
+    }
+
+    private static func uniqueCategoryIds(_ ids: [Int]) -> [Int] {
+        var seen = Set<Int>()
+        return ids.filter { seen.insert($0).inserted }
+    }
+
+    private static func sanitizedForumDynamicTabItems(_ items: [ForumDynamicTabItem]) -> [ForumDynamicTabItem] {
+        var seen = Set<ForumDynamicTabItem>()
+        let uniqueItems = items.filter { seen.insert($0).inserted }
+        let limitedItems = Array(uniqueItems.prefix(maximumConfiguredForumDynamicTabItems))
+        if limitedItems.count >= minimumConfiguredForumDynamicTabItems {
+            return limitedItems
+        }
+        return Array(defaultForumDynamicTabItems.prefix(minimumConfiguredForumDynamicTabItems))
     }
 }

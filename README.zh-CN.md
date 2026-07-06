@@ -23,11 +23,11 @@
 - [x] **帖子浏览** — 最新 / 热门话题列表，无限滚动加载
 - [x] **分类 & 标签** — 按板块或标签浏览话题
 - [x] **帖子详情** — HTML 内容渲染、图片查看、代码块展示、折叠内容
-- [x] **回复 & 发帖** — 回复话题或针对特定楼层回复，发布新帖子
-- [x] **通知** — 通过 MessageBus 长轮询实时接收通知更新
-- [x] **私信** — 查看私信列表，未读标记，点击自动标记已读
-- [x] **安全认证** — 基于 RSA 加密的 Discourse User API Key 认证流程，凭证存储在 Keychain
-- [x] **外观设置** — 跟随系统 / 浅色 / 深色模式，支持自定义主题色
+- [x] **回复** — 回复话题或针对特定楼层回复
+- [x] **安全认证** — Web 会话登录，并将 Cookie 复用于原生请求
+- [x] **外观设置** — 跟随系统 / 浅色 / 深色模式
+- [ ] **通知 & 私信** — 查看论坛通知和私信
+- [ ] **发贴** — 发布论坛帖子
 
 ## 技术栈
 
@@ -36,7 +36,7 @@
 | 语言 | Swift 5 |
 | UI 框架 | UIKit |
 | 最低版本 | iOS 15.0 |
-| 架构 | MVVM + `@Observable` |
+| 架构 | MVVM + `DexoObservableObject` |
 | 构建工具 | [Tuist](https://tuist.dev) |
 | 数据库 | SQLite ([GRDB](https://github.com/groue/GRDB.swift)) |
 | 网络 | [Alamofire](https://github.com/Alamofire/Alamofire) |

@@ -22,18 +22,18 @@ cd Packages/CookedHTML && swift test
 
 ## Architecture
 
-Dexo is a native iOS Discourse forum client (UIKit, iOS 17+). No SwiftUI.
+Dexo is a native iOS Discourse forum client (UIKit, iOS 15+). No SwiftUI.
 
-**MVVM with `@Observable`**
-- ViewModels use Swift 5.9 `@Observable` macro
-- ViewControllers subclass `ObservableViewController`, which drives UI updates via a recursive `withObservationTracking { updateUI() }` loop started in `viewWillAppear`
+**MVVM with iOS 15-compatible observation**
+- ViewModels inherit `DexoObservableObject` and call `notifyChanged()` after UI-relevant state mutations
+- ViewControllers subclass `ObservableViewController`, which listens for `DexoObservableObject.didChangeNotification` and calls `updateUI()`
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` applies project-wide
 
 **Key layers:**
 - `dexo/Networking/` — `DiscourseAPI` (one instance per forum, Alamofire-based) + `DiscourseRouter` (all API routes as enum)
 - `dexo/Core/Auth/` — Discourse User API Key OAuth flow via `ASWebAuthenticationSession` + RSA key pair in Keychain
 - `dexo/Database/` — GRDB `DatabasePool` with versioned migrations, stores `ForumInstance` records
-- `dexo/Core/Settings/` — `AppSettings` (`@Observable` singleton) for user preferences
+- `dexo/Core/Settings/` — `AppSettings` (`DexoObservableObject` singleton) for user preferences
 - `Packages/CookedHTML/` — Local Swift package for parsing Discourse-cooked HTML into `BlockNode`/`InlineNode` trees, with `NSAttributedString` rendering support
 
 **Topic rendering** is fully native — posts go through the UIKit block renderers under `dexo/Features/ForumDetail/TopicDetail/NativeContent/` (one renderer per `ContentBlock` type, all summed into `PostNativeCell`'s content stack). Block heights are precomputed by `BlockHeightCalculator` so `heightForRowAt` doesn't fall back to `systemLayoutSizeFitting`; whenever you change a renderer, mirror the layout math in the calculator's matching case.

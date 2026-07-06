@@ -1,9 +1,6 @@
 import Foundation
 
-import Perception
-
-@Perceptible
-final class MeViewModel {
+final class MeViewModel: DexoObservableObject {
     var currentUser: DiscourseCurrentUser?
     var userProfile: DiscourseUserProfile?
     var summary: DiscourseUserSummary?
@@ -20,37 +17,13 @@ final class MeViewModel {
     func loadProfile() async {
         isLoading = true
         errorMessage = nil
+        notifyChanged()
         do {
-            // Prefer the AuthManager cache (populated at login), but fall back
-            // to `/session/current.json` when it's empty — `fetchAndCacheUsername`
-            // can fail silently (both primary and fallback wrapped in `try?`),
-            // leaving the cache unset even though the API key was saved. Without
-            // this fallback the profile screen would stay empty after login.
-            let username: String
-            if let cached = AuthManager.shared.username(for: api.baseURL) {
-                username = cached
-            } else if api.isLinuxDo {
-                // linux.do's /session/current.json returns empty; use notifications instead.
-                let notifList = try await api.fetchNotifications()
-                guard let resolved = notifList.username else {
-                    throw DiscourseAPIError(messages: ["Unable to resolve username"], errorType: "not_logged_in")
-                }
-                username = resolved
-                AuthManager.shared.setCachedUsername(username, for: api.baseURL)
-            } else {
-                let current = try await api.fetchCurrentUser()
-                username = current.username
-                AuthManager.shared.setCachedUsername(username, for: api.baseURL)
-            }
-
-            let profile = try await api.fetchUserProfile(username: username)
-            let userSummary = try? await api.fetchUserSummary(username: username)
-            currentUser = DiscourseCurrentUser(
-                id: profile.id, username: profile.username,
-                name: profile.name, avatarTemplate: profile.avatarTemplate,
-                unreadNotifications: nil, unreadPrivateMessages: nil,
-                unreadHighPriorityNotifications: nil
-            )
+            let username = AuthManager.shared.username(for: api.baseURL) ?? ""
+            async let profileTask = api.fetchUserProfile(username: username)
+            currentUser = await DiscourseCurrentUser(id: profileTask.id, username: profileTask.username, name: profileTask.name, avatarTemplate: profileTask.avatarTemplate)
+            async let summaryTask = api.fetchUserSummary(username: username)
+            let (profile, userSummary) = try await (profileTask, summaryTask)
             userProfile = profile
             summary = userSummary
         } catch {
@@ -61,6 +34,7 @@ final class MeViewModel {
             }
         }
         isLoading = false
+        notifyChanged()
     }
 
     func reload() async {
@@ -69,6 +43,7 @@ final class MeViewModel {
         currentUser = nil
         userProfile = nil
         summary = nil
+        notifyChanged()
         await loadProfile()
     }
 }

@@ -1,9 +1,6 @@
 import UIKit
 
-import Perception
-
-@Perceptible
-private final class TagTopicsViewModel {
+private final class TagTopicsViewModel: DexoObservableObject {
     var topics: [DiscourseTopicList.Topic] = []
     var isLoading = false
     var isLoadingMore = false
@@ -13,11 +10,14 @@ private final class TagTopicsViewModel {
     private let tagName: String
     private var currentPage = 0
     private var usersById: [Int: DiscourseTopicList.User] = [:]
-    private var categoriesById: [Int: DiscourseCategory] = [:]
 
     init(api: DiscourseAPI, tagName: String) {
         self.api = api
         self.tagName = tagName
+    }
+
+    private var canBrowseTopics: Bool {
+        AuthManager.shared.isAuthenticated(for: api.baseURL)
     }
 
     func avatarTemplate(for topic: DiscourseTopicList.Topic) -> String? {
@@ -25,31 +25,40 @@ private final class TagTopicsViewModel {
         return usersById[firstPoster.userId]?.avatarTemplate
     }
 
-    func category(for topic: DiscourseTopicList.Topic) -> DiscourseCategory? {
-        guard let catId = topic.categoryId else { return nil }
-        return categoriesById[catId]
-    }
-
     func loadTopics() async {
         isLoading = true
         currentPage = 0
+        notifyChanged()
+        defer {
+            isLoading = false
+            notifyChanged()
+        }
+        guard await validateTopicAccess() else { return }
+
         do {
-            async let topicsResult = api.fetchTagTopics(name: tagName, page: 0)
-            async let categoriesResult: Void = loadCategoriesIfNeeded()
-            let result = try await topicsResult
-            _ = await categoriesResult
+            let result = try await api.fetchTagTopics(name: tagName, page: 0)
             topics = result.topicList.topics
             canLoadMore = result.topicList.moreTopicsUrl != nil
             indexUsers(result.users)
         } catch {
+            if let apiError = error as? DiscourseAPIError, apiError.isNotLoggedIn || apiError.isForbidden {
+                clearProtectedContent(invalidateSession: true)
+                return
+            }
             // Error silently handled for now
         }
-        isLoading = false
     }
 
     func loadMoreTopics() async {
         guard canLoadMore, !isLoadingMore else { return }
+        guard await validateTopicAccess() else { return }
         isLoadingMore = true
+        notifyChanged()
+        defer {
+            isLoadingMore = false
+            notifyChanged()
+        }
+
         let nextPage = currentPage + 1
         do {
             let result = try await api.fetchTagTopics(name: tagName, page: nextPage)
@@ -60,9 +69,12 @@ private final class TagTopicsViewModel {
             canLoadMore = result.topicList.moreTopicsUrl != nil
             indexUsers(result.users)
         } catch {
+            if let apiError = error as? DiscourseAPIError, apiError.isNotLoggedIn || apiError.isForbidden {
+                clearProtectedContent(invalidateSession: true)
+                return
+            }
             // Silently fail on load-more
         }
-        isLoadingMore = false
     }
 
     private func indexUsers(_ users: [DiscourseTopicList.User]?) {
@@ -72,23 +84,33 @@ private final class TagTopicsViewModel {
         }
     }
 
-    private func loadCategoriesIfNeeded() async {
-        guard categoriesById.isEmpty else { return }
+    private func validateTopicAccess() async -> Bool {
+        guard canBrowseTopics else {
+            clearProtectedContent(invalidateSession: true)
+            return false
+        }
         do {
-            let list = try await api.fetchCategories()
-            indexCategories(list.categoryList.categories)
+            _ = try await api.fetchCurrentUser()
+            return true
         } catch {
-            // Silently fail
+            if let apiError = error as? DiscourseAPIError, apiError.isNotLoggedIn || apiError.isForbidden {
+                clearProtectedContent(invalidateSession: true)
+            }
+            return false
         }
     }
 
-    private func indexCategories(_ categories: [DiscourseCategory]) {
-        for cat in categories {
-            categoriesById[cat.id] = cat
-            if let subs = cat.subcategoryList {
-                indexCategories(subs)
-            }
+    private func clearProtectedContent(invalidateSession: Bool = false) {
+        topics = []
+        isLoading = false
+        isLoadingMore = false
+        canLoadMore = false
+        currentPage = 0
+        usersById.removeAll()
+        if invalidateSession {
+            AuthManager.shared.invalidateWebSession(for: api.baseURL)
         }
+        notifyChanged()
     }
 }
 
@@ -98,39 +120,39 @@ final class TagTopicsViewController: ObservableViewController {
     private let viewModel: TagTopicsViewModel
 
     private lazy var tableView: UITableView = {
-        let tv = ThemedTableView(frame: .zero, style: .plain)
+        let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(TopicCell.self, forCellReuseIdentifier: TopicCell.reuseIdentifier)
         tv.delegate = self
-        tv.tableHeaderView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
-        tv.showsVerticalScrollIndicator = false
+        tv.separatorStyle = .none
+        tv.backgroundColor = .systemGroupedBackground
+        tv.rowHeight = UITableView.automaticDimension
+        tv.estimatedRowHeight = TopicCell.estimatedHeight
         return tv
     }()
 
-    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = .init(tableView: tableView) { [weak self] tableView, indexPath, topicId in
-        guard let self,
-              let cell = tableView.dequeueReusableCell(withIdentifier: TopicCell.reuseIdentifier, for: indexPath) as? TopicCell,
-              let topic = self.viewModel.topics.first(where: { $0.id == topicId })
-        else {
-            return UITableViewCell()
+    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = {
+        UITableViewDiffableDataSource<Int, Int>(tableView: tableView) { [weak self] tableView, indexPath, topicId in
+            guard let self,
+                  let cell = tableView.dequeueReusableCell(withIdentifier: TopicCell.reuseIdentifier, for: indexPath) as? TopicCell,
+                  let topic = self.viewModel.topics.first(where: { $0.id == topicId }) else {
+                return UITableViewCell()
+            }
+            let avatarURL = AvatarImageLoader.url(
+                from: self.viewModel.avatarTemplate(for: topic),
+                baseURL: self.api.baseURL,
+                size: 96
+            )
+            cell.configure(
+                with: topic,
+                avatarURL: avatarURL,
+                categoryName: nil,
+                categoryColor: nil,
+                tags: topic.tags ?? []
+            )
+            return cell
         }
-        let assetBaseURL = self.api.assetBaseURL
-        var avatarURL: URL?
-        if let template = self.viewModel.avatarTemplate(for: topic) {
-            let sized = template.replacingOccurrences(of: "{size}", with: "96")
-            let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
-            avatarURL = URL(string: urlString)
-        }
-        let category = self.viewModel.category(for: topic)
-        let categoryColor: UIColor? = category.flatMap { Self.color(fromHex: $0.color) }
-        cell.configure(
-            with: topic,
-            avatarURL: avatarURL,
-            categoryName: category?.name,
-            categoryColor: categoryColor
-        )
-        return cell
-    }
+    }()
 
     private let activityIndicator: UIActivityIndicatorView = {
         let ai = UIActivityIndicatorView(style: .medium)
@@ -146,28 +168,31 @@ final class TagTopicsViewController: ObservableViewController {
         return spinner
     }()
 
+    private let emptyFooterView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
+
     private lazy var refreshControl: UIRefreshControl = {
         let rc = UIRefreshControl()
         rc.addTarget(self, action: #selector(pullToRefresh), for: .valueChanged)
         return rc
     }()
 
-    init(api: DiscourseAPI, tag: DiscourseTopicDetail.Tag) {
+    init(api: DiscourseAPI, tagName: String) {
         self.api = api
-        self.tagName = tag.name
-        self.viewModel = TagTopicsViewModel(api: api, tagName: String(tag.id))
+        self.tagName = tagName
+        self.viewModel = TagTopicsViewModel(api: api, tagName: tagName)
         super.init(nibName: nil, bundle: nil)
         title = tagName
     }
 
-    @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        tableView.tableFooterView = footerSpinner
+        view.backgroundColor = .systemGroupedBackground
+
+        tableView.tableFooterView = emptyFooterView
         tableView.refreshControl = refreshControl
 
         view.addSubview(tableView)
@@ -208,9 +233,11 @@ final class TagTopicsViewController: ObservableViewController {
         }
 
         if viewModel.isLoadingMore {
+            tableView.tableFooterView = footerSpinner
             footerSpinner.startAnimating()
         } else {
             footerSpinner.stopAnimating()
+            tableView.tableFooterView = emptyFooterView
         }
     }
 
@@ -219,19 +246,6 @@ final class TagTopicsViewController: ObservableViewController {
             await viewModel.loadTopics()
             refreshControl.endRefreshing()
         }
-    }
-}
-
-extension TagTopicsViewController {
-    fileprivate static func color(fromHex hex: String) -> UIColor? {
-        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        guard cleaned.count == 6, let rgb = UInt64(cleaned, radix: 16) else { return nil }
-        return UIColor(
-            red: CGFloat((rgb >> 16) & 0xFF) / 255,
-            green: CGFloat((rgb >> 8) & 0xFF) / 255,
-            blue: CGFloat(rgb & 0xFF) / 255,
-            alpha: 1
-        )
     }
 }
 
@@ -245,7 +259,7 @@ extension TagTopicsViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
         let totalRows = tableView.numberOfRows(inSection: 0)
-        if indexPath.row >= totalRows - 1 {
+        if indexPath.row >= totalRows - 5 {
             Task {
                 await viewModel.loadMoreTopics()
             }

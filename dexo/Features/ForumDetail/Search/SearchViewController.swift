@@ -187,7 +187,7 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
         if let cat = viewModel.selectedCategory() {
             applyButtonConfig(
                 categoryButton,
-                title: cat.name,
+                title: viewModel.categoryDisplayName(for: cat) ?? cat.name,
                 systemImage: "folder.fill",
                 isActive: true,
                 dotColor: Self.color(fromHex: cat.color)
@@ -285,7 +285,7 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
 
         for cat in viewModel.categories {
             let catAction = UIAction(
-                title: cat.name,
+                title: viewModel.categoryDisplayName(for: cat) ?? cat.name,
                 image: colorDotImage(hex: cat.color),
                 state: viewModel.selectedCategoryId == cat.id ? .on : .off
             ) { [weak self] _ in
@@ -296,7 +296,7 @@ final class SearchViewController: ObservableViewController, UISearchBarDelegate 
                 var groupChildren: [UIAction] = [catAction]
                 for sub in subs {
                     let subAction = UIAction(
-                        title: sub.name,
+                        title: viewModel.categoryDisplayName(for: sub) ?? sub.name,
                         image: colorDotImage(hex: sub.color),
                         state: viewModel.selectedCategoryId == sub.id ? .on : .off
                     ) { [weak self] _ in

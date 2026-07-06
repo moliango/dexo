@@ -4,14 +4,11 @@ import UIKit
 final class SearchResultCell: UITableViewCell {
     static let reuseIdentifier = "SearchResultCell"
 
-    private static let baseAvatarSize: CGFloat = 36
-    private var avatarWidthConstraint: NSLayoutConstraint!
-    private var avatarHeightConstraint: NSLayoutConstraint!
-
     private let avatarImageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
+        iv.layer.cornerRadius = 18
         iv.backgroundColor = .secondarySystemFill
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
@@ -19,7 +16,7 @@ final class SearchResultCell: UITableViewCell {
 
     private let titleLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 16, weight: .medium)
+        label.font = .systemFont(ofSize: 16, weight: .medium)
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -27,6 +24,8 @@ final class SearchResultCell: UITableViewCell {
 
     private let blurbLabel: UILabel = {
         let label = UILabel()
+        label.font = .systemFont(ofSize: 14)
+        label.textColor = .secondaryLabel
         label.numberOfLines = 2
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -34,14 +33,11 @@ final class SearchResultCell: UITableViewCell {
 
     private let usernameLabel: UILabel = {
         let label = UILabel()
-        label.font = FontManager.shared.font(size: 12)
+        label.font = .systemFont(ofSize: 12)
         label.textColor = .tertiaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
     }()
-
-    private var bottomToBlurb: NSLayoutConstraint!
-    private var bottomToUsername: NSLayoutConstraint!
 
     override init(style: UITableViewCell.CellStyle, reuseIdentifier: String?) {
         super.init(style: style, reuseIdentifier: reuseIdentifier)
@@ -55,136 +51,55 @@ final class SearchResultCell: UITableViewCell {
 
     private func setupUI() {
         contentView.addSubview(avatarImageView)
-        contentView.addSubview(usernameLabel)
         contentView.addSubview(titleLabel)
         contentView.addSubview(blurbLabel)
-
-        bottomToBlurb = blurbLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10)
-        bottomToUsername = titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10)
-
-        avatarWidthConstraint = avatarImageView.widthAnchor.constraint(equalToConstant: Self.baseAvatarSize)
-        avatarHeightConstraint = avatarImageView.heightAnchor.constraint(equalToConstant: Self.baseAvatarSize)
+        contentView.addSubview(usernameLabel)
 
         NSLayoutConstraint.activate([
             avatarImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
             avatarImageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
-            avatarWidthConstraint,
-            avatarHeightConstraint,
+            avatarImageView.widthAnchor.constraint(equalToConstant: 36),
+            avatarImageView.heightAnchor.constraint(equalToConstant: 36),
 
-            usernameLabel.topAnchor.constraint(equalTo: avatarImageView.topAnchor),
-            usernameLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 10),
-
-            titleLabel.topAnchor.constraint(equalTo: usernameLabel.bottomAnchor, constant: 2),
-            titleLabel.leadingAnchor.constraint(equalTo: usernameLabel.leadingAnchor),
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 10),
+            titleLabel.leadingAnchor.constraint(equalTo: avatarImageView.trailingAnchor, constant: 10),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
 
             blurbLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            blurbLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 16),
+            blurbLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
             blurbLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+
+            usernameLabel.topAnchor.constraint(equalTo: blurbLabel.bottomAnchor, constant: 4),
+            usernameLabel.leadingAnchor.constraint(equalTo: titleLabel.leadingAnchor),
+            usernameLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -10),
         ])
     }
 
-    func configure(with post: DiscourseSearchResult.SearchPost, topicTitle: String?, assetBaseURL: String) {
-        let avatarSize = FontManager.shared.scaled(Self.baseAvatarSize)
-        avatarWidthConstraint.constant = avatarSize
-        avatarHeightConstraint.constant = avatarSize
-        avatarImageView.layer.cornerRadius = avatarSize / 2
-
-        // Use topic title when available, fall back to headline
-        if let topicTitle, !topicTitle.isEmpty {
-            titleLabel.attributedText = nil
-            titleLabel.text = topicTitle
-        } else if let headline = post.topicTitleHeadline {
-            titleLabel.attributedText = Self.highlightedString(
-                html: headline,
-                baseFont: FontManager.shared.font(size: 16, weight: .medium),
-                highlightFont: FontManager.shared.font(size: 16, weight: .bold),
-                baseColor: .label
-            )
+    func configure(with post: DiscourseSearchResult.SearchPost, baseURL: String) {
+        // Strip HTML tags from headline for plain text display
+        if let headline = post.topicTitleHeadline {
+            titleLabel.text = headline.replacingOccurrences(of: "<[^>]+>", with: "", options: .regularExpression)
         } else {
-            titleLabel.attributedText = nil
             titleLabel.text = nil
         }
 
+        blurbLabel.text = post.blurb
         usernameLabel.text = post.username
 
-        // Show blurb for replies
-        let hasBlurb = post.blurb != nil && !post.blurb!.isEmpty
-        if hasBlurb {
-            blurbLabel.attributedText = Self.highlightedString(
-                html: post.blurb!,
-                baseFont: FontManager.shared.font(size: 14),
-                highlightFont: FontManager.shared.font(size: 14, weight: .semibold),
-                baseColor: .secondaryLabel
-            )
-            blurbLabel.isHidden = false
-            bottomToUsername.isActive = false
-            bottomToBlurb.isActive = true
-        } else {
-            blurbLabel.isHidden = true
-            bottomToBlurb.isActive = false
-            bottomToUsername.isActive = true
-        }
-
-        if let template = post.avatarTemplate {
-            let sized = template.replacingOccurrences(of: "{size}", with: "96")
-            let urlString = sized.hasPrefix("http") ? sized : assetBaseURL + sized
-            avatarImageView.sd_setImage(with: URL(string: urlString), context: ImageCacheManager.shared.avatarContext)
-        } else {
-            avatarImageView.image = nil
-        }
+        AvatarImageLoader.setImage(
+            on: avatarImageView,
+            template: post.avatarTemplate,
+            baseURL: baseURL,
+            size: 96
+        )
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
         titleLabel.text = nil
-        titleLabel.attributedText = nil
-        blurbLabel.attributedText = nil
+        blurbLabel.text = nil
         usernameLabel.text = nil
         avatarImageView.sd_cancelCurrentImageLoad()
         avatarImageView.image = nil
-    }
-
-    // MARK: - Search Highlight Parsing
-
-    /// Parses simple HTML with `<span class="search-highlight">` tags into an attributed string
-    /// where highlighted terms use `highlightFont` and the rest uses `baseFont`.
-    private static func highlightedString(
-        html: String,
-        baseFont: UIFont,
-        highlightFont: UIFont,
-        baseColor: UIColor
-    ) -> NSAttributedString {
-        let baseAttrs: [NSAttributedString.Key: Any] = [.font: baseFont, .foregroundColor: baseColor]
-        let highlightAttrs: [NSAttributedString.Key: Any] = [.font: highlightFont, .foregroundColor: baseColor]
-
-        let result = NSMutableAttributedString()
-        let scanner = Scanner(string: html)
-        scanner.charactersToBeSkipped = nil
-
-        while !scanner.isAtEnd {
-            // Scan text before the next tag
-            if let text = scanner.scanUpToString("<") {
-                result.append(NSAttributedString(string: text, attributes: baseAttrs))
-            }
-
-            guard !scanner.isAtEnd else { break }
-
-            // Check if this is a search-highlight span
-            if scanner.scanString("<span class=\"search-highlight\">") != nil {
-                if let highlighted = scanner.scanUpToString("</span>") {
-                    result.append(NSAttributedString(string: highlighted, attributes: highlightAttrs))
-                }
-                _ = scanner.scanString("</span>")
-            } else if scanner.scanString("<") != nil {
-                // Skip other HTML tags
-                if let tagContent = scanner.scanUpToString(">") {
-                    _ = tagContent // discard
-                }
-                _ = scanner.scanString(">")
-            }
-        }
-
-        return result
     }
 }

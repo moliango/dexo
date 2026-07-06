@@ -10,230 +10,57 @@ enum ListRenderer: BlockRenderer {
     static func render(_ block: ContentBlock, config: NativeRenderConfig, delegate: PostCellDelegate?) -> UIView {
         guard case .list(let ordered, let items) = block else { return UIView() }
 
-        let indent: CGFloat = ordered ? 20 : 12
-
-        // Fast path: if ALL items are flat (paragraph-only), combine into a single UITextView.
-        // This avoids creating N separate UITextViews for long lists (e.g. 29-item link lists).
-        if items.allSatisfy({ canRenderFlat($0) }) {
-            return renderCombinedFlatList(items, ordered: ordered, indent: indent, config: config)
-        }
-
-        let stack = UIStackView()
-        stack.axis = .vertical
-        stack.spacing = 4
-        stack.translatesAutoresizingMaskIntoConstraints = false
-
-        for (index, item) in items.enumerated() {
-            let itemView = renderItem(
-                item,
-                ordered: ordered,
-                index: index,
-                indent: indent,
-                config: config,
-                delegate: delegate
-            )
-            stack.addArrangedSubview(itemView)
-        }
-
-        return stack
-    }
-
-    /// Renders all flat items as a single view — O(1) views instead of O(n).
-    private static func renderCombinedFlatList(
-        _ items: [ListItem],
-        ordered: Bool,
-        indent: CGFloat,
-        config: NativeRenderConfig
-    ) -> UIView {
-        let combined = NSMutableAttributedString()
-        var interactive = false
-        for (index, item) in items.enumerated() {
-            if index > 0 { combined.append(NSAttributedString(string: "\n")) }
-
-            var allInlines: [InlineNode] = []
-            for (i, block) in item.blocks.enumerated() {
-                if case .paragraph(let inlines) = block {
-                    if i > 0 { allInlines.append(.lineBreak) }
-                    allInlines.append(contentsOf: inlines)
-                }
-            }
-            if !interactive, NativeContentRenderer.inlinesNeedTextView(allInlines) {
-                interactive = true
-            }
-            combined.append(makeBulletedAttributedString(
-                inlines: allInlines,
-                ordered: ordered,
-                index: index,
-                indent: indent,
-                config: config
-            ))
-        }
-        return makeLineView(attributedText: combined, interactive: interactive, config: config)
-    }
-
-    private static func renderItem(
-        _ item: ListItem,
-        ordered: Bool,
-        index: Int,
-        indent: CGFloat,
-        config: NativeRenderConfig,
-        delegate: PostCellDelegate?
-    ) -> UIView {
-        // Simple case: item has only inline paragraphs (no nested blocks).
-        // Render as a single attributed string for compact layout.
-        if canRenderFlat(item) {
-            return renderFlatItem(item, ordered: ordered, index: index, indent: indent, config: config)
-        }
-
-        // Complex case: item has nested blocks. Use a vertical stack.
-        let itemStack = UIStackView()
-        itemStack.axis = .vertical
-        itemStack.spacing = 4
-
-        var isFirstBlock = true
-
-        for block in item.blocks {
-            if isFirstBlock, case .paragraph(let inlines) = block {
-                // First paragraph: prepend bullet
-                isFirstBlock = false
-                let result = makeBulletedAttributedString(
-                    inlines: inlines,
-                    ordered: ordered,
-                    index: index,
-                    indent: indent,
-                    config: config
-                )
-                let interactive = NativeContentRenderer.inlinesNeedTextView(inlines)
-                itemStack.addArrangedSubview(makeLineView(attributedText: result, interactive: interactive, config: config))
-            } else {
-                if isFirstBlock {
-                    // First block is not a paragraph — show standalone bullet
-                    isFirstBlock = false
-                    let bulletOnly = makeBulletedAttributedString(
-                        inlines: [],
-                        ordered: ordered,
-                        index: index,
-                        indent: indent,
-                        config: config
-                    )
-                    itemStack.addArrangedSubview(makeLineView(attributedText: bulletOnly, interactive: false, config: config))
-                }
-
-                // Render child block with indentation
-                let childConfig = NativeRenderConfig(
-                    baseFont: config.baseFont,
-                    baseColor: config.baseColor,
-                    linkColor: config.linkColor,
-                    codeFont: config.codeFont,
-                    codeBackgroundColor: config.codeBackgroundColor,
-                    contentWidth: config.contentWidth - indent,
-                    baseURL: config.baseURL
-                )
-                let childViews = NativeContentRenderer.renderBlocks([block], config: childConfig, delegate: delegate)
-                for childView in childViews {
-                    let wrapper = UIView()
-                    wrapper.translatesAutoresizingMaskIntoConstraints = false
-                    childView.translatesAutoresizingMaskIntoConstraints = false
-                    wrapper.addSubview(childView)
-                    NSLayoutConstraint.activate([
-                        childView.leadingAnchor.constraint(equalTo: wrapper.leadingAnchor, constant: indent),
-                        childView.trailingAnchor.constraint(equalTo: wrapper.trailingAnchor),
-                        childView.topAnchor.constraint(equalTo: wrapper.topAnchor),
-                        childView.bottomAnchor.constraint(equalTo: wrapper.bottomAnchor),
-                    ])
-                    itemStack.addArrangedSubview(wrapper)
-                }
-            }
-        }
-
-        // Edge case: empty item
-        if isFirstBlock {
-            let bulletOnly = makeBulletedAttributedString(
-                inlines: [],
-                ordered: ordered,
-                index: index,
-                indent: indent,
-                config: config
-            )
-            itemStack.addArrangedSubview(makeLineView(attributedText: bulletOnly, interactive: false, config: config))
-        }
-
-        return itemStack
-    }
-
-    /// Returns true if the item contains only paragraphs (no nested lists, images, code blocks, etc.)
-    private static func canRenderFlat(_ item: ListItem) -> Bool {
-        item.blocks.allSatisfy { block in
-            if case .paragraph = block { return true }
-            return false
-        }
-    }
-
-    /// Renders a simple item (all-paragraph) as a single text view with bullet prefix.
-    private static func renderFlatItem(
-        _ item: ListItem,
-        ordered: Bool,
-        index: Int,
-        indent: CGFloat,
-        config: NativeRenderConfig
-    ) -> UIView {
-        var allInlines: [InlineNode] = []
-        for (i, block) in item.blocks.enumerated() {
-            if case .paragraph(let inlines) = block {
-                if i > 0 { allInlines.append(.lineBreak) }
-                allInlines.append(contentsOf: inlines)
-            }
-        }
-        let result = makeBulletedAttributedString(
-            inlines: allInlines,
-            ordered: ordered,
-            index: index,
-            indent: indent,
-            config: config
-        )
-        let interactive = NativeContentRenderer.inlinesNeedTextView(allInlines)
-        return makeLineView(attributedText: result, interactive: interactive, config: config)
-    }
-
-    // MARK: - Helpers
-
-    private static func makeBulletedAttributedString(
-        inlines: [InlineNode],
-        ordered: Bool,
-        index: Int,
-        indent: CGFloat,
-        config: NativeRenderConfig
-    ) -> NSAttributedString {
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.paragraphSpacing = 4
-        paragraphStyle.lineSpacing = config.baseFont.pointSize * 0.2
-        paragraphStyle.headIndent = indent
-        paragraphStyle.firstLineHeadIndent = 0
-        paragraphStyle.tabStops = [NSTextTab(textAlignment: .left, location: indent, options: [:])]
-        paragraphStyle.defaultTabInterval = indent
-
         let result = NSMutableAttributedString()
-        let bullet = ordered ? "\(index + 1).\t" : "\u{2022}\t"
-        result.append(NSAttributedString(string: bullet, attributes: [
-            .font: config.baseFont,
-            .foregroundColor: config.baseColor,
-            .paragraphStyle: paragraphStyle,
-        ]))
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineSpacing = config.defaultLineSpacing
+        paragraphStyle.paragraphSpacing = config.defaultParagraphSpacing
+        paragraphStyle.minimumLineHeight = config.baseFont.lineHeight + config.defaultLineSpacing
+        paragraphStyle.headIndent = 12
+        paragraphStyle.firstLineHeadIndent = 0
 
-        if !inlines.isEmpty {
-            result.append(inlines.attributedString(config: config.attributedStringConfig))
+        if ordered {
+            paragraphStyle.headIndent = 20
+            let tabStop = NSTextTab(textAlignment: .left, location: 20, options: [:])
+            paragraphStyle.tabStops = [tabStop]
+            paragraphStyle.defaultTabInterval = 20
+        } else {
+            paragraphStyle.headIndent = 12
+            let tabStop = NSTextTab(textAlignment: .left, location: 12, options: [:])
+            paragraphStyle.tabStops = [tabStop]
+            paragraphStyle.defaultTabInterval = 12
         }
 
-        result.addAttribute(
-            .paragraphStyle,
-            value: paragraphStyle,
-            range: NSRange(location: 0, length: result.length)
-        )
+        for (index, item) in items.enumerated() {
+            let bullet: String
+            if ordered {
+                bullet = "\(index + 1).\t"
+            } else {
+                bullet = "\u{2022}\t"
+            }
+            let itemStart = result.length
 
-        return result
-    }
+            let bulletAttr = NSAttributedString(string: bullet, attributes: [
+                .font: config.baseFont,
+                .foregroundColor: config.baseColor,
+                .paragraphStyle: paragraphStyle,
+            ])
+            result.append(bulletAttr)
 
-    private static func makeTextView(attributedText: NSAttributedString, config: NativeRenderConfig) -> LinkTextView {
+            let itemAttr = item.content.attributedString(config: config.attributedStringConfig)
+            result.append(itemAttr)
+
+            if index < items.count - 1 {
+                result.append(NSAttributedString(string: "\n"))
+            }
+
+            let itemEnd = result.length
+            result.addAttribute(
+                .paragraphStyle,
+                value: paragraphStyle,
+                range: NSRange(location: itemStart, length: itemEnd - itemStart)
+            )
+        }
+
         let textView = LinkTextView()
         textView.isEditable = false
         textView.isScrollEnabled = false
@@ -241,25 +68,49 @@ enum ListRenderer: BlockRenderer {
         textView.textContainer.lineFragmentPadding = 0
         textView.backgroundColor = .clear
         textView.dataDetectorTypes = []
-        textView.attributedText = attributedText
+        textView.attributedText = result
         textView.linkTextAttributes = [
             .foregroundColor: config.linkColor,
         ]
         textView.translatesAutoresizingMaskIntoConstraints = false
-        return textView
+        return ListBlockView(ordered: ordered, textView: textView)
+    }
+}
+
+private final class ListBlockView: UIView {
+    init(ordered: Bool, textView: UIView) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        TopicDetailContentStyle.applySurface(
+            to: self,
+            backgroundColor: TopicDetailContentStyle.mutedBackground,
+            cornerRadius: 14,
+            borderAlpha: 0.22
+        )
+
+        let iconView = UIImageView(image: UIImage(systemName: ordered ? "list.number" : "list.bullet"))
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.tintColor = .secondaryLabel
+        iconView.contentMode = .scaleAspectFit
+
+        addSubview(iconView)
+        addSubview(textView)
+
+        NSLayoutConstraint.activate([
+            iconView.topAnchor.constraint(equalTo: topAnchor, constant: 14),
+            iconView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            textView.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            textView.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+            textView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            textView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+        ])
     }
 
-    /// Cheap UILabel when the line is non-interactive; LinkTextView otherwise.
-    /// A flat list of N pure-text items collapses to N UILabels (or 1 UILabel via
-    /// renderCombinedFlatList), avoiding N expensive UITextView instantiations.
-    private static func makeLineView(
-        attributedText: NSAttributedString,
-        interactive: Bool,
-        config: NativeRenderConfig
-    ) -> UIView {
-        if interactive {
-            return makeTextView(attributedText: attributedText, config: config)
-        }
-        return NativeContentRenderer.makeContentLabel(attributedText: attributedText)
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 }

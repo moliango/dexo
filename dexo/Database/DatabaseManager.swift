@@ -32,8 +32,6 @@ final class DatabaseManager: Sendable {
                 t.column("title", .text).notNull()
                 t.column("baseURL", .text).notNull()
                 t.column("iconURL", .text)
-                t.column("apiKey", .text)
-                t.column("apiUsername", .text)
                 t.column("addedAt", .datetime).notNull()
                 t.column("sortOrder", .integer).notNull().defaults(to: 0)
             }
@@ -49,6 +47,32 @@ final class DatabaseManager: Sendable {
     }
 
     // MARK: - Forum CRUD
+
+    func defaultForum() -> ForumInstance {
+        do {
+            return try ensureDefaultForum()
+        } catch {
+            assertionFailure("Failed to prepare default forum: \(error)")
+            return ForumInstance.linuxDoDefault()
+        }
+    }
+
+    func ensureDefaultForum() throws -> ForumInstance {
+        try dbPool.write { db in
+            let forums = try ForumInstance.fetchAll(db)
+            if var forum = forums.first(where: { $0.isLinuxDoDefault }) {
+                if forum.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    forum.title = ForumInstance.linuxDoTitle
+                    try forum.save(db)
+                }
+                return forum
+            }
+
+            var forum = ForumInstance.linuxDoDefault()
+            try forum.save(db)
+            return forum
+        }
+    }
 
     func fetchAllForums() throws -> [ForumInstance] {
         try dbPool.read { db in

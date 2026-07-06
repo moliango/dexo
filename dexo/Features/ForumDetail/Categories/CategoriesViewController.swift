@@ -6,10 +6,12 @@ final class CategoriesViewController: ObservableViewController {
     private weak var authGate: AuthGating?
 
     private lazy var tableView: UITableView = {
-        let tv = ThemedTableView(frame: .zero, style: .plain)
+        let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(CategoryCell.self, forCellReuseIdentifier: CategoryCell.reuseIdentifier)
         tv.delegate = self
+        tv.separatorStyle = .none
+        tv.backgroundColor = .systemGroupedBackground
         return tv
     }()
 
@@ -71,7 +73,10 @@ final class CategoriesViewController: ObservableViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        view.backgroundColor = .systemGroupedBackground
+
         tableView.refreshControl = refreshControl
+        tableView.tableFooterView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
 
         view.addSubview(tableView)
         view.addSubview(activityIndicator)

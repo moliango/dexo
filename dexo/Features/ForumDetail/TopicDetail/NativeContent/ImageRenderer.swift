@@ -9,13 +9,13 @@ final class TappableImageContainer: UIView {
     var imageURL: URL?
     weak var delegate: PostCellDelegate?
 
-    /// The actual image view. `SDAnimatedImageView` only for formats that can animate
-    /// (GIF); for static JPEG/PNG/WebP we use plain `UIImageView`, which is several
-    /// times cheaper to instantiate (no animation state, no frame timer, no
-    /// `SDAnimatedImageProvider` plumbing).
-    /// Exposed for zoom transition animations.
-    var displayedImageView: UIImageView { imageView }
-    private let imageView: UIImageView
+    private let imageView: SDAnimatedImageView = {
+        let iv = SDAnimatedImageView()
+        iv.contentMode = .scaleAspectFill
+        iv.clipsToBounds = true
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        return iv
+    }()
 
     private var imageHeightConstraint: NSLayoutConstraint!
     private var imageWidthConstraint: NSLayoutConstraint!
@@ -24,17 +24,8 @@ final class TappableImageContainer: UIView {
     /// Images narrower than this are displayed proportionally smaller on screen.
     private static let referenceWidth: CGFloat = 690
 
-    private static func isLikelyAnimated(_ url: URL) -> Bool {
-        url.pathExtension.lowercased() == "gif"
-    }
-
     init(url: URL, width: Int?, height: Int?, containerWidth: CGFloat, href: URL? = nil) {
         imageURL = href ?? url
-        let iv: UIImageView = Self.isLikelyAnimated(url) ? SDAnimatedImageView() : UIImageView()
-        iv.contentMode = .scaleAspectFill
-        iv.clipsToBounds = true
-        iv.translatesAutoresizingMaskIntoConstraints = false
-        imageView = iv
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
 
@@ -42,7 +33,7 @@ final class TappableImageContainer: UIView {
 
         let displayWidth: CGFloat
         let displayHeight: CGFloat
-        if let w = width, let h = height, w > 0, h > 0 {
+        if let w = width, let h = height, w > 0 {
             let fraction = min(CGFloat(w) / Self.referenceWidth, 1)
             displayWidth = containerWidth * fraction
             displayHeight = CGFloat(h) * (displayWidth / CGFloat(w))
@@ -73,22 +64,26 @@ final class TappableImageContainer: UIView {
         imageHeightConstraint = imageView.heightAnchor.constraint(equalToConstant: displayHeight)
         imageHeightConstraint.isActive = true
 
-        backgroundColor = .clear
-        imageView.backgroundColor = .clear
-        imageView.layer.cornerRadius = 4
+        backgroundColor = isFullWidth ? .tertiarySystemGroupedBackground : .clear
+        layer.cornerRadius = isFullWidth ? 10 : 0
+        layer.cornerCurve = .continuous
+        clipsToBounds = isFullWidth
+        imageView.backgroundColor = .secondarySystemFill
+        imageView.layer.cornerRadius = 10
+        imageView.layer.cornerCurve = .continuous
         imageView.clipsToBounds = true
 
         // Pause GIF animation by default; resumed when visible on screen
-        (imageView as? SDAnimatedImageView)?.autoPlayAnimatedImage = false
+        imageView.autoPlayAnimatedImage = false
 
         let hasOriginalSize = width != nil && height != nil
 
-        imageView.sd_setImage(with: url, placeholderImage: nil, options: [], context: ImageCacheManager.shared.contentContext, progress: nil) { [weak self] image, _, _, _ in
+        imageView.sd_setImage(with: url) { [weak self] image, _, _, _ in
             guard let self, let image else { return }
+            self.imageView.backgroundColor = .clear
             if !hasOriginalSize {
                 let ratio = containerWidth / image.size.width
                 self.imageHeightConstraint.constant = image.size.height * ratio
-                self.scheduleCoalescedHeightUpdate()
             }
         }
 
@@ -102,63 +97,13 @@ final class TappableImageContainer: UIView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Last tapped container, used by the zoom transition to find the source frame.
-    static weak var lastTapped: TappableImageContainer?
-
     @objc private func imageTapped() {
         guard let imageURL else { return }
-        Self.lastTapped = self
-        let postId = findPostId()
-        delegate?.postCell(didTapImageURL: imageURL, inPostId: postId)
-    }
-
-    private func findPostId() -> Int {
-        var view: UIView? = superview
-        while let v = view {
-            if let cell = v as? PostNativeCell { return cell.postId }
-            view = v.superview
-        }
-        return 0
+        delegate?.postCell(didTapImageURL: imageURL)
     }
 
     func cancelImageLoad() {
         imageView.sd_cancelCurrentImageLoad()
-    }
-
-    // MARK: - Coalesced Height Updates
-
-    /// Table views that already have a pending height update scheduled.
-    /// Multiple image loads resolving in the same run-loop pass are coalesced
-    /// into a single beginUpdates/endUpdates call.
-    private static var pendingUpdateTableViews = Set<ObjectIdentifier>()
-
-    private func scheduleCoalescedHeightUpdate() {
-        guard let tableView = findTableView() else { return }
-        let id = ObjectIdentifier(tableView)
-        guard !Self.pendingUpdateTableViews.contains(id) else { return }
-        Self.pendingUpdateTableViews.insert(id)
-        DispatchQueue.main.async { [weak tableView] in
-            Self.pendingUpdateTableViews.remove(id)
-            guard let tableView else { return }
-            let t0 = CACurrentMediaTime()
-            let offset = tableView.contentOffset
-            tableView.beginUpdates()
-            tableView.endUpdates()
-            if abs(tableView.contentOffset.y - offset.y) > 1 {
-                tableView.contentOffset = offset
-            }
-            let ms = (CACurrentMediaTime() - t0) * 1000
-            if ms > 3 { FrameDropDetector.shared.log("imageHeightUpdate \(String(format: "%.1f", ms))ms") }
-        }
-    }
-
-    private func findTableView() -> UITableView? {
-        var view: UIView? = superview
-        while let v = view {
-            if let tv = v as? UITableView { return tv }
-            view = v.superview
-        }
-        return nil
     }
 
     // MARK: - GIF Animation Control

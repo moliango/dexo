@@ -1,11 +1,10 @@
 import CookedHTML
-import SDWebImage
 import UIKit
 
 enum DiscourseQuoteRenderer: BlockRenderer {
     static func canRender(_ block: ContentBlock) -> Bool {
-        if case .discourseQuote = block { return true }
-        return false
+        guard case .discourseQuote(_, _, _, _, _, _, let content) = block else { return false }
+        return NativeContentRenderer.canRenderNatively(content)
     }
 
     static func render(_ block: ContentBlock, config: NativeRenderConfig, delegate: PostCellDelegate?) -> UIView {
@@ -15,7 +14,13 @@ enum DiscourseQuoteRenderer: BlockRenderer {
 
         let container = UIView()
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.backgroundColor = ThemeManager.shared.codeBackgroundColor
+        TopicDetailContentStyle.applySurface(
+            to: container,
+            backgroundColor: TopicDetailContentStyle.mutedBackground,
+            cornerRadius: 14,
+            borderAlpha: 0.24
+        )
+        container.clipsToBounds = true
 
         // Header: avatar + (username OR topic title + category badge)
         let headerStack = UIStackView()
@@ -25,7 +30,7 @@ enum DiscourseQuoteRenderer: BlockRenderer {
         headerStack.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(headerStack)
 
-        let avatarSize = FontManager.shared.scaled(20)
+        let avatarSize: CGFloat = 20
         let avatarImageView = UIImageView()
         avatarImageView.translatesAutoresizingMaskIntoConstraints = false
         avatarImageView.contentMode = .scaleAspectFill
@@ -39,22 +44,20 @@ enum DiscourseQuoteRenderer: BlockRenderer {
             avatarImageView.heightAnchor.constraint(equalToConstant: avatarSize),
         ])
 
-        if let avatarURL, let url = URL(string: avatarURL) {
-            avatarImageView.sd_setImage(with: url, context: ImageCacheManager.shared.avatarContext)
-        }
+        AvatarImageLoader.setImage(
+            on: avatarImageView,
+            url: AvatarImageLoader.url(from: avatarURL, baseURL: config.baseURL ?? "", size: 48),
+            placeholder: UIImage(systemName: "person.crop.circle")
+        )
 
         if let topicTitle, !topicTitle.isEmpty {
             // Topic-link variant: title button + optional category badge
             let titleButton = UIButton(type: .system)
             titleButton.setTitle(topicTitle, for: .normal)
-            titleButton.titleLabel?.font = FontManager.shared.font(size: 13, weight: .semibold)
+            titleButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .semibold)
             titleButton.titleLabel?.lineBreakMode = .byTruncatingTail
             titleButton.setTitleColor(.link, for: .normal)
             titleButton.contentHorizontalAlignment = .leading
-            // Hug tight (high) so a short title doesn't stretch the button and push
-            // the category badge to the far right. Low compression resistance still
-            // lets long titles shrink + tail-truncate when the stack can't fit them.
-            titleButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
             titleButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             if let topicURL, let url = URL(string: topicURL) {
                 titleButton.addAction(UIAction { _ in
@@ -79,7 +82,7 @@ enum DiscourseQuoteRenderer: BlockRenderer {
         } else if let username, !username.isEmpty {
             // Username variant (existing behavior)
             let nameLabel = UILabel()
-            nameLabel.font = FontManager.shared.font(size: 13, weight: .semibold)
+            nameLabel.font = .systemFont(ofSize: 13, weight: .semibold)
             nameLabel.textColor = .secondaryLabel
             nameLabel.text = username
             headerStack.addArrangedSubview(nameLabel)
@@ -87,9 +90,9 @@ enum DiscourseQuoteRenderer: BlockRenderer {
 
         // Vertical bar + content
         let bar = UIView()
-        bar.backgroundColor = ThemeManager.shared.quoteBarColor
+        bar.backgroundColor = UIColor.systemTeal.withAlphaComponent(0.72)
         bar.translatesAutoresizingMaskIntoConstraints = false
-        bar.layer.cornerRadius = 1.5
+        bar.layer.cornerRadius = 2
         container.addSubview(bar)
 
         let contentStack = UIStackView()
@@ -100,11 +103,11 @@ enum DiscourseQuoteRenderer: BlockRenderer {
 
         let quoteConfig = NativeRenderConfig(
             baseFont: config.baseFont.withSize(config.baseFont.pointSize - 1),
-            baseColor: .secondaryLabel,
+            baseColor: UIColor.label.withAlphaComponent(0.78),
             linkColor: config.linkColor,
             codeFont: config.codeFont,
             codeBackgroundColor: config.codeBackgroundColor,
-            contentWidth: config.contentWidth - 36,
+            contentWidth: config.contentWidth - 44,
             baseURL: config.baseURL
         )
 
@@ -114,23 +117,19 @@ enum DiscourseQuoteRenderer: BlockRenderer {
         }
 
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: container.topAnchor),
-            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            bar.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            bar.widthAnchor.constraint(equalToConstant: 3),
+            bar.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            bar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            bar.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+            bar.widthAnchor.constraint(equalToConstant: 4),
 
-            headerStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
-            headerStack.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: 10),
-            // `lessThanOrEqualTo` so the stack hugs to its natural content width when
-            // the title is short — title+badge sit next to each other at the leading
-            // side with any extra space left blank, instead of the button stretching
-            // and pushing the badge to the trailing edge.
-            { let c = headerStack.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -12); c.priority = .init(999); return c }(),
+            headerStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
+            headerStack.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: 12),
+            { let c = headerStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14); c.priority = .init(999); return c }(),
 
             contentStack.topAnchor.constraint(equalTo: headerStack.bottomAnchor, constant: 8),
-            contentStack.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: 10),
-            { let c = contentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12); c.priority = .init(999); return c }(),
-            contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            contentStack.leadingAnchor.constraint(equalTo: bar.trailingAnchor, constant: 12),
+            { let c = contentStack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14); c.priority = .init(999); return c }(),
+            contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
         ])
 
         return container
@@ -148,15 +147,16 @@ private class CategoryBadgeView: UIView {
 
         let label = UILabel()
         label.text = name
-        label.font = FontManager.shared.font(size: 11, weight: .semibold)
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
         label.textColor = .secondaryLabel
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
 
-        backgroundColor = .tertiarySystemBackground
-        layer.cornerRadius = 3
+        backgroundColor = .secondarySystemGroupedBackground
+        layer.cornerRadius = 6
+        layer.cornerCurve = .continuous
         layer.borderWidth = 1
-        layer.borderColor = UIColor.separator.cgColor
+        layer.borderColor = UIColor.separator.withAlphaComponent(0.35).cgColor
 
         NSLayoutConstraint.activate([
             label.topAnchor.constraint(equalTo: topAnchor, constant: 2),

@@ -2,79 +2,49 @@ import CookedHTML
 import SafariServices
 import UIKit
 
-private nonisolated enum ReplyItem: Hashable, Sendable {
-    case post(Int)
-    case boosts(Int)
-}
-
-final class RepliesViewController: BaseViewController {
+final class RepliesViewController: UIViewController {
     private let api: DiscourseAPI
     private let postId: Int
     private let topicId: Int
     private let baseURL: String
-    private let assetBaseURL: String
-    private let validReactions: [String]
 
     private var replies: [DiscourseTopicDetail.Post] = []
     private var parsedBlocks: [Int: [AnnotatedBlock]] = [:]
-    private var expandedBoostPostIds: Set<Int> = []
+    private var unsupportedPostIds: Set<Int> = []
+    private var downloadedAttachmentURLs: Set<URL> = []
 
     private lazy var tableView: UITableView = {
-        let tv = ThemedTableView(frame: .zero, style: .plain)
+        let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(PostNativeCell.self, forCellReuseIdentifier: PostNativeCell.reuseIdentifier)
-        tv.register(BoostCell.self, forCellReuseIdentifier: BoostCell.reuseIdentifier)
         tv.delegate = self
         tv.separatorStyle = .none
         return tv
     }()
 
-    private lazy var dataSource: UITableViewDiffableDataSource<Int, ReplyItem> = .init(tableView: tableView) { [weak self] tableView, indexPath, item in
-        guard let self else { return UITableViewCell() }
-
-        switch item {
-        case .post(let postId):
-            guard let post = self.replies.first(where: { $0.id == postId }),
-                  let annotatedBlocks = self.parsedBlocks[postId],
-                  let cell = tableView.dequeueReusableCell(withIdentifier: PostNativeCell.reuseIdentifier, for: indexPath) as? PostNativeCell
-            else {
-                return UITableViewCell()
-            }
-            let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
-            let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
-            let floorNumber = (self.replies.firstIndex(where: { $0.id == postId }) ?? 0) + 1
-            let isBoostsExpanded = self.expandedBoostPostIds.contains(postId)
-            cell.configure(
-                with: post,
-                annotatedBlocks: annotatedBlocks,
-                cachedContentViews: nil,
-                config: config,
-                delegate: self,
-                floorNumber: floorNumber,
-                postLink: postLink,
-                baseURL: self.baseURL,
-                assetBaseURL: self.assetBaseURL,
-                validReactions: validReactions,
-                isBoostsExpanded: isBoostsExpanded,
-                showsSeparator: !isBoostsExpanded,
-                hidesLikeButton: self.hidesLikeButton
-            )
-            return cell
-
-        case .boosts(let postId):
-            guard let post = self.replies.first(where: { $0.id == postId }),
-                  let cell = tableView.dequeueReusableCell(withIdentifier: BoostCell.reuseIdentifier, for: indexPath) as? BoostCell
-            else {
-                return UITableViewCell()
-            }
-            cell.configure(
-                post: post,
-                delegate: self,
-                assetBaseURL: self.assetBaseURL,
-                contentWidth: tableView.bounds.width - 24
-            )
-            return cell
+    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int> = .init(tableView: tableView) { [weak self] tableView, indexPath, postId in
+        guard let self,
+              let post = self.replies.first(where: { $0.id == postId }),
+              let annotatedBlocks = self.parsedBlocks[postId],
+              let cell = tableView.dequeueReusableCell(withIdentifier: PostNativeCell.reuseIdentifier, for: indexPath) as? PostNativeCell
+        else {
+            return UITableViewCell()
         }
+        let postLink = "\(self.baseURL)/t/\(self.topicId)/\(post.postNumber)"
+        let config = NativeRenderConfig.default(contentWidth: tableView.bounds.width - 24, baseURL: self.baseURL)
+        let hasUnsupported = self.unsupportedPostIds.contains(postId)
+        cell.configure(
+            with: post,
+            annotatedBlocks: annotatedBlocks,
+            config: config,
+            delegate: self,
+            floorNumber: indexPath.row + 1,
+            postLink: postLink,
+            baseURL: self.baseURL,
+            hasUnsupportedBlocks: hasUnsupported,
+            cookedHTML: post.cooked, validReactions: [],
+        )
+        return cell
     }
 
     private let activityIndicator: UIActivityIndicatorView = {
@@ -84,21 +54,11 @@ final class RepliesViewController: BaseViewController {
         return ai
     }()
 
-    private let readTracker = TopicReadTracker()
-    private var readFlushTimer: Timer?
-    private var pendingReadFlush: DispatchWorkItem?
-    private static let readFlushInterval: TimeInterval = 60
-    private static let readFlushDebounce: TimeInterval = 1.5
-    private let hidesLikeButton: Bool
-
-    init(api: DiscourseAPI, postId: Int, topicId: Int, validReactions: [String] = []) {
+    init(api: DiscourseAPI, postId: Int, topicId: Int) {
         self.api = api
         self.postId = postId
         self.topicId = topicId
-        self.validReactions = validReactions
         self.baseURL = api.baseURL
-        self.assetBaseURL = api.assetBaseURL
-        self.hidesLikeButton = ForumPolicy.hidesLikeButton(baseURL: api.baseURL)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -110,6 +70,7 @@ final class RepliesViewController: BaseViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Replies"
+        view.backgroundColor = .systemBackground
 
         view.addSubview(tableView)
         view.addSubview(activityIndicator)
@@ -127,127 +88,39 @@ final class RepliesViewController: BaseViewController {
         Task {
             await loadReplies()
         }
-
-        let nc = NotificationCenter.default
-        nc.addObserver(
-            self, selector: #selector(appDidEnterBackground),
-            name: UIApplication.didEnterBackgroundNotification, object: nil
-        )
-        nc.addObserver(
-            self, selector: #selector(appWillEnterForeground),
-            name: UIApplication.willEnterForegroundNotification, object: nil
-        )
-    }
-
-    override func viewWillAppear(_ animated: Bool) {
-        super.viewWillAppear(animated)
-        resumeReadTracking()
-        startReadFlushTimer()
-        scheduleDebouncedReadFlush()
-    }
-
-    @objc private func appDidEnterBackground() {
-        cancelPendingReadFlush()
-        stopReadFlushTimer()
-        flushReadTimings()
-        readTracker.pause()
-    }
-
-    @objc private func appWillEnterForeground() {
-        resumeReadTracking()
-        startReadFlushTimer()
-        scheduleDebouncedReadFlush()
-    }
-
-    private func scheduleDebouncedReadFlush() {
-        cancelPendingReadFlush()
-        let work = DispatchWorkItem { [weak self] in
-            self?.pendingReadFlush = nil
-            self?.flushReadTimings()
-        }
-        pendingReadFlush = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.readFlushDebounce, execute: work)
-    }
-
-    private func cancelPendingReadFlush() {
-        pendingReadFlush?.cancel()
-        pendingReadFlush = nil
-    }
-
-    private func resumeReadTracking() {
-        readTracker.startSession()
-        for indexPath in tableView.indexPathsForVisibleRows ?? [] {
-            guard let item = dataSource.itemIdentifier(for: indexPath),
-                  case .post(let postId) = item,
-                  let post = replies.first(where: { $0.id == postId }) else { continue }
-            readTracker.recordVisible(postNumber: post.postNumber)
-        }
-    }
-
-    private func startReadFlushTimer() {
-        stopReadFlushTimer()
-        let timer = Timer(timeInterval: Self.readFlushInterval, repeats: true) { [weak self] _ in
-            self?.flushReadTimings()
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        readFlushTimer = timer
-    }
-
-    private func stopReadFlushTimer() {
-        readFlushTimer?.invalidate()
-        readFlushTimer = nil
-    }
-
-    private func flushReadTimings() {
-        let snap = readTracker.snapshotDelta()
-        debugLog("[ReadTracker] replies topic=\(topicId) flush topic_time=\(snap.topicTime) posts=\(snap.timings.count)")
-        guard !snap.timings.isEmpty else { return }
-        let topicId = self.topicId
-        let api = self.api
-        Task.detached {
-            try? await api.postTopicTimings(
-                topicId: topicId,
-                topicTime: snap.topicTime,
-                timings: snap.timings
-            )
-        }
     }
 
     // MARK: - Data Loading
 
-    private func applySnapshot() {
-        var snapshot = NSDiffableDataSourceSnapshot<Int, ReplyItem>()
-        snapshot.appendSections([0])
-        var items: [ReplyItem] = []
-        for post in replies {
-            items.append(.post(post.id))
-            if expandedBoostPostIds.contains(post.id) {
-                items.append(.boosts(post.id))
-            }
-        }
-        snapshot.appendItems(items, toSection: 0)
-        dataSource.apply(snapshot, animatingDifferences: false)
-    }
-
     private func loadReplies() async {
         activityIndicator.startAnimating()
-        defer { activityIndicator.stopAnimating() }
 
         do {
             let response = try await api.fetchPostReplies(postId: postId)
             replies = response
             parsedBlocks = [:]
-            expandedBoostPostIds = []
+            unsupportedPostIds = []
 
             for post in response {
                 let annotated = CookedHTMLParser.parseAnnotated(html: post.cooked, baseURL: baseURL)
                 parsedBlocks[post.id] = annotated
+                let hasUnsupported = annotated.contains { ab in
+                    !NativeContentRenderer.renderers.contains { $0.canRender(ab.block) }
+                }
+                if hasUnsupported {
+                    unsupportedPostIds.insert(post.id)
+                }
             }
 
-            applySnapshot()
+            var snapshot = NSDiffableDataSourceSnapshot<Int, Int>()
+            snapshot.appendSections([0])
+            snapshot.appendItems(response.map(\.id), toSection: 0)
+            await dataSource.apply(snapshot, animatingDifferences: false)
         } catch {
             // silently fail
         }
+
+        activityIndicator.stopAnimating()
     }
 }
 
@@ -261,72 +134,22 @@ extension RepliesViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, estimatedHeightForRowAt indexPath: IndexPath) -> CGFloat {
         200
     }
-
-    func tableView(_ tableView: UITableView, willDisplay cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        guard let item = dataSource.itemIdentifier(for: indexPath),
-              case .post(let postId) = item,
-              let post = replies.first(where: { $0.id == postId }) else { return }
-        readTracker.recordVisible(postNumber: post.postNumber)
-    }
-
-    func tableView(_ tableView: UITableView, didEndDisplaying cell: UITableViewCell, forRowAt indexPath: IndexPath) {
-        guard let item = dataSource.itemIdentifier(for: indexPath),
-              case .post(let postId) = item,
-              let post = replies.first(where: { $0.id == postId }) else { return }
-        readTracker.recordHidden(postNumber: post.postNumber)
-    }
-
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        scheduleDebouncedReadFlush()
-    }
-
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !decelerate { scheduleDebouncedReadFlush() }
-    }
-
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        cancelPendingReadFlush()
-    }
-}
-
-extension RepliesViewController {
-    override func viewWillDisappear(_ animated: Bool) {
-        super.viewWillDisappear(animated)
-        cancelPendingReadFlush()
-        stopReadFlushTimer()
-        flushReadTimings()
-        readTracker.pause()
-    }
 }
 
 // MARK: - PostCellDelegate
 
 extension RepliesViewController: PostCellDelegate {
-    func postCell(didTapImageURL url: URL, inPostId postId: Int) {
-        openExternalURL(url)
+    func postCell(didTapImageURL url: URL) {
+        let safari = SFSafariViewController(url: url)
+        present(safari, animated: true)
     }
 
     func postCell(didTapLinkURL url: URL) {
-        openExternalURL(url)
-    }
-
-    private func openExternalURL(_ url: URL) {
-        let scheme = url.scheme?.lowercased()
-        if scheme == "http" || scheme == "https" {
-            let safari = SFSafariViewController(url: url)
-            present(safari, animated: true)
-        } else {
-            UIApplication.shared.open(url)
-        }
+        handleLink(url)
     }
 
     func postCell(didTapShowRepliesForPostId postId: Int) {
-        let repliesVC = RepliesViewController(
-            api: api,
-            postId: postId,
-            topicId: topicId,
-            validReactions: validReactions
-        )
+        let repliesVC = RepliesViewController(api: api, postId: postId, topicId: topicId)
         if let sheet = repliesVC.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
@@ -339,261 +162,240 @@ extension RepliesViewController: PostCellDelegate {
     }
 
     func postCell(didTapReplyToPost post: DiscourseTopicDetail.Post) {
-        guard let authGate = findAuthGating() else { return }
-        authGate.requireAuth { [weak self] in
-            guard let self else { return }
-            self.presentReplyComposer(for: post)
+        performAuthenticated { [weak self] in
+            self?.presentReplyComposer(for: post)
         }
     }
 
-    func postCell(didTapReplyReferenceForPost post: DiscourseTopicDetail.Post) {
-        // The replies list is already a "what replied to what" view — chasing
-        // the parent reference here would duplicate that context. No-op.
-    }
-
-    func postCell(didToggleCollapseForPostId postId: Int) {
-        // No tree-mode UI in the replies list; nothing to collapse.
-    }
-
-    func postCell(didTapLoadMoreChildrenForParentId parentPostId: Int) {
-        // No tree-mode UI in the replies list; nothing to expand.
-    }
-
     func postCell(didToggleBookmarkForPost post: DiscourseTopicDetail.Post, isBookmarked: Bool) {
-        Task {
-            do {
-                if isBookmarked {
-                    _ = try await api.createBookmark(postId: post.id)
-                } else if let bookmarkId = post.bookmarkId {
-                    try await api.deleteBookmark(id: bookmarkId)
+        performAuthenticated { [weak self] in
+            guard let self else { return }
+            Task {
+                do {
+                    if isBookmarked {
+                        _ = try await self.api.createBookmark(postId: post.id)
+                    } else if let bookmarkId = post.bookmarkId {
+                        try await self.api.deleteBookmark(id: bookmarkId)
+                    }
+                } catch {
+                    self.showPostActionError(error)
                 }
-            } catch {
-                // Optimistic UI — server state will reconcile on next refresh
             }
         }
     }
 
     func postCell(didTapAvatarForUsername username: String) {
         let vc = UserProfileViewController(api: api, username: username)
-        if let navigationController {
-            navigationController.pushViewController(vc, animated: true)
-        } else {
-            let nav = UINavigationController(rootViewController: vc)
-            present(nav, animated: true)
-        }
+        let nav = UINavigationController(rootViewController: vc)
+        present(nav, animated: true)
     }
 
     func postCell(didTapReaction reactionId: String, forPost post: DiscourseTopicDetail.Post) {
-        Task {
-            do {
-                try await api.toggleReaction(postId: post.id, reactionId: reactionId)
-                await refreshPost(id: post.id)
-            } catch {
-                debugLog("didTapReaction 发生错误: \(error)")
-                presentChallengePromptIfNeeded(error: error, on: api)
-            }
-        }
-    }
-
-    func postCell(didToggleLikeForPost post: DiscourseTopicDetail.Post, liked: Bool) {
-        Task {
-            do {
-                if liked {
-                    try await api.likePost(postId: post.id)
-                } else {
-                    try await api.unlikePost(postId: post.id)
+        performAuthenticated { [weak self] in
+            guard let self else { return }
+            Task {
+                do {
+                    try await self.api.toggleReaction(postId: post.id, reactionId: reactionId)
+                    await self.loadReplies()
+                } catch {
+                    self.showPostActionError(error)
                 }
-                await refreshPost(id: post.id)
-            } catch {
-                presentChallengePromptIfNeeded(error: error, on: api)
             }
-        }
-    }
-
-    /// Re-fetch a single post and reconfigure its row.
-    private func refreshPost(id: Int) async {
-        guard let fresh = try? await api.fetchPost(id: id) else { return }
-        guard let index = replies.firstIndex(where: { $0.id == id }) else { return }
-        let existing = replies[index]
-        let cookedChanged = existing.cooked != fresh.cooked
-        // Carry over plugin-only fields stripped by /posts/{id}.json so the
-        // boost button / poll state aren't reset by the refresh.
-        var merged = fresh
-        merged.boosts = existing.boosts
-        merged.canBoost = existing.canBoost
-        merged.polls = existing.polls
-        merged.pollsVotes = existing.pollsVotes
-        replies[index] = merged
-        if cookedChanged {
-            parsedBlocks[id] = CookedHTMLParser.parseAnnotated(html: merged.cooked, baseURL: api.baseURL)
-        }
-        var snapshot = dataSource.snapshot()
-        let item = ReplyItem.post(id)
-        if snapshot.itemIdentifiers.contains(item) {
-            snapshot.reconfigureItems([item])
-            await dataSource.apply(snapshot, animatingDifferences: false)
         }
     }
 
     func postCell(didTapBoostForPost post: DiscourseTopicDetail.Post) {
-        guard let authGate = findAuthGating() else { return }
-        authGate.requireAuth { [weak self] in
-            self?.presentBoostComposer(for: post)
+        performAuthenticated { [weak self] in
+            self?.presentBoostInput(for: post)
         }
     }
 
-    func postCell(didTapToggleBoostsForPost post: DiscourseTopicDetail.Post, sourceView: UIView) {
-        if expandedBoostPostIds.contains(post.id) {
-            expandedBoostPostIds.remove(post.id)
+    private func performAuthenticated(_ action: @escaping () -> Void) {
+        if let authGate = findAuthGating() {
+            authGate.requireAuth(then: action)
         } else {
-            expandedBoostPostIds.insert(post.id)
+            action()
         }
-        refreshBoostUI()
-    }
-
-    func postCell(didTapDeleteBoost boost: DiscourseTopicDetail.Boost) {
-        let alert = UIAlertController(
-            title: String(localized: "action.delete"),
-            message: String(localized: "topic_detail.boost.delete.confirm"),
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
-        alert.addAction(UIAlertAction(title: String(localized: "action.delete"), style: .destructive) { [weak self] _ in
-            guard let self else { return }
-            Task {
-                do {
-                    try await self.api.deleteBoost(id: boost.id)
-                    guard let index = self.replies.firstIndex(where: { $0.boosts.contains(where: { $0.id == boost.id }) }) else { return }
-                    self.replies[index].boosts.removeAll { $0.id == boost.id }
-                    self.replies[index].canBoost = true
-                    if self.replies[index].boosts.isEmpty {
-                        self.expandedBoostPostIds.remove(self.replies[index].id)
-                    }
-                    self.refreshBoostUI()
-                } catch {
-                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) {
-                        return
-                    }
-                    let failureAlert = UIAlertController(
-                        title: String(localized: "reply.send.failed"),
-                        message: error.localizedDescription,
-                        preferredStyle: .alert
-                    )
-                    failureAlert.addAction(UIAlertAction(title: String(localized: "weblogin.done"), style: .default))
-                    self.present(failureAlert, animated: true)
-                }
-            }
-        })
-        present(alert, animated: true)
     }
 
     private func findAuthGating() -> AuthGating? {
-        var vc: UIViewController? = self
-        while let parent = vc?.parent {
-            if let gate = parent as? AuthGating { return gate }
-            for child in parent.children {
-                if let gate = child as? AuthGating { return gate }
-                for grandchild in child.children {
-                    if let gate = grandchild as? AuthGating { return gate }
+        nearestAuthGating()
+    }
+
+    private func handleLink(_ url: URL) {
+        let linkURL = ForumInternalLinkParser.normalizedURL(from: url, baseURL: baseURL)
+        if ForumInternalLinkParser.isInternalURL(linkURL, baseURL: baseURL),
+           let destination = ForumInternalLinkParser.destination(for: linkURL) {
+            openInternalDestination(destination)
+        } else if ForumAttachmentLinkParser.isAttachmentURL(linkURL) {
+            downloadAndShareAttachment(linkURL)
+        } else {
+            presentSafari(linkURL)
+        }
+    }
+
+    private func openInternalDestination(_ destination: ForumInternalLinkDestination) {
+        switch destination {
+        case let .topic(topicId):
+            let detailVC = TopicDetailViewController(api: api, topicId: topicId)
+            openInternalViewController(detailVC)
+        case let .category(slug, categoryId):
+            let category = DiscourseCategory(id: categoryId, name: slug, slug: slug)
+            let vc = CategoryTopicsViewController(api: api, category: category)
+            openInternalViewController(vc)
+        case let .tag(tagName):
+            let vc = TagTopicsViewController(api: api, tagName: tagName)
+            openInternalViewController(vc)
+        }
+    }
+
+    private func downloadAndShareAttachment(_ url: URL) {
+        let progressAlert = makeAttachmentDownloadAlert()
+        present(progressAlert, animated: true)
+        let attachmentBaseURL = baseURL
+
+        Task { @MainActor [weak self, weak progressAlert] in
+            do {
+                let fileURL = try await ForumAttachmentDownloader.download(url: url, baseURL: attachmentBaseURL)
+                guard let self else {
+                    ForumAttachmentDownloader.cleanupDownloadedFile(fileURL)
+                    return
+                }
+                self.downloadedAttachmentURLs.insert(fileURL)
+                progressAlert?.dismiss(animated: true) {
+                    self.presentAttachmentShareSheet(fileURL)
+                }
+            } catch {
+                progressAlert?.dismiss(animated: true) { [weak self] in
+                    self?.showPostActionError(error)
                 }
             }
-            vc = parent
+        }
+    }
+
+    private func makeAttachmentDownloadAlert() -> UIAlertController {
+        let alert = UIAlertController(
+            title: String(localized: "attachment.downloading"),
+            message: "\n\n",
+            preferredStyle: .alert
+        )
+        let indicator = UIActivityIndicatorView(style: .medium)
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.startAnimating()
+        alert.view.addSubview(indicator)
+        NSLayoutConstraint.activate([
+            indicator.centerXAnchor.constraint(equalTo: alert.view.centerXAnchor),
+            indicator.bottomAnchor.constraint(equalTo: alert.view.bottomAnchor, constant: -22),
+        ])
+        return alert
+    }
+
+    private func presentAttachmentShareSheet(_ fileURL: URL) {
+        let activity = UIActivityViewController(activityItems: [fileURL], applicationActivities: nil)
+        activity.popoverPresentationController?.sourceView = view
+        activity.popoverPresentationController?.sourceRect = view.bounds
+        activity.completionWithItemsHandler = { [weak self] _, _, _, _ in
+            self?.downloadedAttachmentURLs.remove(fileURL)
+            ForumAttachmentDownloader.cleanupDownloadedFile(fileURL)
+        }
+        present(activity, animated: true)
+    }
+
+    private func openInternalViewController(_ viewController: UIViewController) {
+        if let navigationController {
+            navigationController.pushViewController(viewController, animated: true)
+            return
+        }
+
+        guard let targetNavigationController = presenterNavigationController() else {
+            let nav = UINavigationController(rootViewController: viewController)
+            present(nav, animated: true)
+            return
+        }
+
+        if let presenter = presentingViewController {
+            presenter.dismiss(animated: true) {
+                targetNavigationController.pushViewController(viewController, animated: true)
+            }
+        } else {
+            targetNavigationController.pushViewController(viewController, animated: true)
+        }
+    }
+
+    private func presenterNavigationController() -> UINavigationController? {
+        var candidate = presentingViewController
+        while let viewController = candidate {
+            if let navigationController = viewController as? UINavigationController {
+                return navigationController
+            }
+            if let navigationController = viewController.navigationController {
+                return navigationController
+            }
+            candidate = viewController.presentingViewController
         }
         return nil
     }
 
-    private func refreshBoostUI() {
-        applySnapshot()
-        tableView.reloadData()
+    private func presentSafari(_ url: URL) {
+        let safari = SFSafariViewController(url: url)
+        present(safari, animated: true)
     }
 
-    private func presentReplyComposer(for post: DiscourseTopicDetail.Post) {
+    private func showPostActionError(_ error: Error) {
+        let alert = UIAlertController(
+            title: String(localized: "post.action.failed"),
+            message: error.localizedDescription,
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: "OK", style: .default))
+        present(alert, animated: true)
+    }
+
+    private func presentBoostInput(for post: DiscourseTopicDetail.Post) {
+        let input = BoostInputViewController(api: api)
+        input.onSubmit = { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case let .boost(raw):
+                Task {
+                    do {
+                        _ = try await self.api.createBoost(postId: post.id, raw: raw)
+                        await self.loadReplies()
+                    } catch {
+                        self.showPostActionError(error)
+                    }
+                }
+            case let .reply(raw):
+                self.presentReplyComposer(for: post, initialText: raw)
+            }
+        }
+        input.modalPresentationStyle = .pageSheet
+        if let sheet = input.sheetPresentationController {
+            sheet.detents = [.medium()]
+            sheet.prefersGrabberVisible = false
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = false
+        }
+        present(input, animated: true)
+    }
+
+    private func presentReplyComposer(for post: DiscourseTopicDetail.Post, initialText: String? = nil) {
         let composer = ReplyComposerViewController(
             api: api,
             topicId: topicId,
             replyToPost: post,
-            baseURL: baseURL
+            baseURL: baseURL,
+            initialText: initialText
         )
-        composer.onPostCreated = { [weak self] _, _ in
+        composer.onPostCreated = { [weak self] in
             guard let self else { return }
             Task { await self.loadReplies() }
         }
-        let nav = UINavigationController(rootViewController: composer)
-        if let sheet = nav.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
-            sheet.prefersGrabberVisible = true
+        composer.modalPresentationStyle = .pageSheet
+        if let sheet = composer.sheetPresentationController {
+            sheet.detents = [.large()]
+            sheet.prefersGrabberVisible = false
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = false
         }
-        present(nav, animated: true)
-    }
-
-    private func presentBoostComposer(for post: DiscourseTopicDetail.Post) {
-        let alert = UIAlertController(title: nil, message: nil, preferredStyle: .alert)
-        alert.addTextField { textField in
-            textField.placeholder = String(localized: "reply.placeholder")
-        }
-        alert.addAction(UIAlertAction(title: String(localized: "action.cancel"), style: .cancel))
-        alert.addAction(UIAlertAction(title: String(localized: "reply.send"), style: .default) { [weak self, weak alert] _ in
-            guard let self,
-                  let raw = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !raw.isEmpty
-            else { return }
-
-            Task {
-                do {
-                    let boost = try await self.api.createBoost(postId: post.id, raw: raw)
-                    guard let index = self.replies.firstIndex(where: { $0.id == post.id }) else { return }
-                    if !self.replies[index].boosts.contains(where: { $0.id == boost.id }) {
-                        self.replies[index].boosts.append(boost)
-                    }
-                    self.replies[index].canBoost = false
-                    self.expandedBoostPostIds.insert(post.id)
-                    self.refreshBoostUI()
-                } catch {
-                    if self.presentChallengePromptIfNeeded(error: error, on: self.api) {
-                        return
-                    }
-                    let failureAlert = UIAlertController(
-                        title: String(localized: "reply.send.failed"),
-                        message: error.localizedDescription,
-                        preferredStyle: .alert
-                    )
-                    failureAlert.addAction(UIAlertAction(title: String(localized: "weblogin.done"), style: .default))
-                    self.present(failureAlert, animated: true)
-                }
-            }
-        })
-        present(alert, animated: true)
-    }
-
-    func postCell(didVotePoll pollName: String, options: [String], forPost post: DiscourseTopicDetail.Post) {
-        // Voting not supported in replies sheet
-    }
-
-    func postCell(didRemovePollVote pollName: String, forPost post: DiscourseTopicDetail.Post) {
-        // Voting not supported in replies sheet
-    }
-
-    func postCell(didTapFlagPost post: DiscourseTopicDetail.Post, sourceView: UIView) {
-        // Flag not supported in replies sheet
-    }
-
-    func postCell(didLongPressPost post: DiscourseTopicDetail.Post) {
-        Task {
-            do {
-                let detail = try await api.fetchPost(id: post.id)
-                guard let raw = detail.raw, !raw.isEmpty else { return }
-                let vc = RawContentViewController(raw: raw, username: post.username, floorNumber: post.postNumber)
-                let nav = UINavigationController(rootViewController: vc)
-                if let sheet = nav.sheetPresentationController {
-                    sheet.detents = [.medium(), .large()]
-                    sheet.prefersGrabberVisible = true
-                }
-                present(nav, animated: true)
-            } catch {
-                let alert = UIAlertController(title: nil, message: error.localizedDescription, preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: String(localized: "action.ok"), style: .default))
-                present(alert, animated: true)
-            }
-        }
+        present(composer, animated: true)
     }
 }

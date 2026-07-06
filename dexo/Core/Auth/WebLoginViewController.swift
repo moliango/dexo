@@ -3,36 +3,19 @@ import WebKit
 
 /// Presents a WKWebView so users can log in to a Discourse forum via their browser.
 /// Fires onSuccess once the Discourse session cookie `_t` is detected.
-final class WebLoginViewController: BaseViewController {
+final class WebLoginViewController: UIViewController {
     private let targetURL: URL
     private let onSuccess: ([HTTPCookie], String?) -> Void
 
     private lazy var webView: WKWebView = {
         let config = WKWebViewConfiguration()
+        config.websiteDataStore = .default()
         config.preferences.javaScriptCanOpenWindowsAutomatically = true
-
-        // Polyfills for iOS < 16.4: CSS.supports override for browser detection,
-        // API polyfills, and static{} block transpilation for Webpack chunks.
-        if #unavailable(iOS 16.4) {
-            let polyfillSource = Self.polyfillJS
-            let script = WKUserScript(source: polyfillSource, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-            config.userContentController.addUserScript(script)
-        }
-
-        // Inject color-scheme hint so the page respects dark mode
-        let darkModeCSS = WKUserScript(
-            source: "document.documentElement.style.colorScheme = 'light dark';",
-            injectionTime: .atDocumentStart,
-            forMainFrameOnly: true
-        )
-        config.userContentController.addUserScript(darkModeCSS)
 
         let wv = WKWebView(frame: .zero, configuration: config)
         wv.navigationDelegate = coordinator
         wv.uiDelegate = coordinator
-        wv.isOpaque = false
-        wv.backgroundColor = .systemBackground
-        wv.customUserAgent = Self.mobileSafariUserAgent
+        wv.allowsBackForwardNavigationGestures = true
         wv.translatesAutoresizingMaskIntoConstraints = false
         return wv
     }()
@@ -61,7 +44,7 @@ final class WebLoginViewController: BaseViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "weblogin.title")
-
+        view.backgroundColor = .systemBackground
         navigationItem.leftBarButtonItem = UIBarButtonItem(
             barButtonSystemItem: .cancel, target: self, action: #selector(cancelTapped)
         )
@@ -86,6 +69,7 @@ final class WebLoginViewController: BaseViewController {
             self?.progressView.isHidden = wv.estimatedProgress >= 1.0
         }
 
+        coordinator.attach(to: webView.configuration.websiteDataStore)
         webView.load(URLRequest(url: targetURL))
     }
 
@@ -96,7 +80,7 @@ final class WebLoginViewController: BaseViewController {
     }
 
     @objc private func doneTapped() {
-        coordinator.collectAndFire(from: webView)
+        coordinator.collectAndFireIfPossible(from: webView, force: true)
     }
 
     private func handleCookiesReady(_ cookies: [HTTPCookie]) {
@@ -112,67 +96,9 @@ final class WebLoginViewController: BaseViewController {
         }
     }
 
-    // MARK: - User Agent
-
-    /// Mobile Safari UA that tracks the device's actual iOS version + idiom
-    /// so server-side feature detection (Discourse's browser gate, dark-mode
-    /// hints, etc.) matches what real Safari would report. WebKit/Safari
-    /// build numbers stay pinned — they aren't tied to the iOS version and
-    /// real Safari rarely changes them within a major release.
-    private static var mobileSafariUserAgent: String {
-        let version = UIDevice.current.systemVersion          // e.g. "18.2.1"
-        let parts = version.split(separator: ".")
-        let major = parts.first.map(String.init) ?? "18"
-        let minor = parts.count > 1 ? String(parts[1]) : "0"
-        let osToken = "\(major)_\(minor)"                     // "18_2"
-        let versionToken = "\(major).\(minor)"                // "18.2"
-        let device = UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
-        return "Mozilla/5.0 (\(device); CPU \(device) OS \(osToken) like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(versionToken) Mobile/15E148 Safari/604.1"
-    }
-
-    // MARK: - Polyfills (iOS < 16.4)
-
-    private static let polyfillJS = """
-    (function() {
-        // CSS.supports override — Discourse browser detection
-        var orig = CSS.supports.bind(CSS);
-        CSS.supports = function() {
-            var s = arguments.length === 1 ? arguments[0] : arguments[0] + ':' + arguments[1];
-            if (s.indexOf('subgrid') !== -1 || s.indexOf('hsl(from') !== -1) return true;
-            return orig.apply(CSS, arguments);
-        };
-
-        // structuredClone (iOS 15.4+)
-        if (typeof globalThis.structuredClone === 'undefined') {
-            globalThis.structuredClone = function(obj) { return JSON.parse(JSON.stringify(obj)); };
-        }
-        // Object.hasOwn (iOS 15.4+)
-        if (!Object.hasOwn) {
-            Object.hasOwn = function(obj, prop) { return Object.prototype.hasOwnProperty.call(obj, prop); };
-        }
-        // Array.prototype.at (iOS 15.4+)
-        if (!Array.prototype.at) {
-            Array.prototype.at = function(i) { var n = Math.trunc(i) || 0; if (n < 0) n += this.length; if (n < 0 || n >= this.length) return undefined; return this[n]; };
-        }
-        // String.prototype.at (iOS 15.4+)
-        if (!String.prototype.at) {
-            String.prototype.at = function(i) { var n = Math.trunc(i) || 0; if (n < 0) n += this.length; if (n < 0 || n >= this.length) return undefined; return this[n]; };
-        }
-        // crypto.randomUUID (iOS 15.4+)
-        if (typeof crypto !== 'undefined' && !crypto.randomUUID) {
-            crypto.randomUUID = function() {
-                var a = new Uint8Array(16); crypto.getRandomValues(a);
-                a[6] = (a[6] & 0x0f) | 0x40; a[8] = (a[8] & 0x3f) | 0x80;
-                var h = Array.from(a, function(b) { return b.toString(16).padStart(2,'0'); }).join('');
-                return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
-            };
-        }
-    })();
-    """
-
     // MARK: - Coordinator
 
-    private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    private final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKHTTPCookieStoreObserver {
         private let targetHost: String
         private let onCookiesReady: ([HTTPCookie]) -> Void
         private(set) var didCallback = false
@@ -182,23 +108,44 @@ final class WebLoginViewController: BaseViewController {
             self.onCookiesReady = onCookiesReady
         }
 
+        func attach(to dataStore: WKWebsiteDataStore) {
+            dataStore.httpCookieStore.add(self)
+        }
+
         func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge,
                      completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void)
         {
             completionHandler(.performDefaultHandling, nil)
         }
 
-        /// Collect cookies and fire the callback. Only invoked from the "Done" button tap —
-        /// auto-dismiss on navigation finish / cookie change was intentionally removed so
-        /// the user decides when to hand off to the app.
-        func collectAndFire(from webView: WKWebView) {
+        func collectAndFireIfPossible(from webView: WKWebView, force: Bool = false) {
             guard !didCallback else { return }
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 guard let self, !self.didCallback else { return }
                 let relevant = cookies.filter { $0.domain.contains(self.targetHost) }
+                let hasSession = relevant.contains { $0.name == "_t" }
+                guard hasSession || force else { return }
                 self.didCallback = true
                 DispatchQueue.main.async { self.onCookiesReady(relevant) }
             }
+        }
+
+        nonisolated func cookiesDidChange(in cookieStore: WKHTTPCookieStore) {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                cookieStore.getAllCookies { cookies in
+                    guard !self.didCallback else { return }
+                    let relevant = cookies.filter { $0.domain.contains(self.targetHost) }
+                    let hasSession = relevant.contains { $0.name == "_t" }
+                    guard hasSession else { return }
+                    self.didCallback = true
+                    DispatchQueue.main.async { self.onCookiesReady(relevant) }
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            collectAndFireIfPossible(from: webView)
         }
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

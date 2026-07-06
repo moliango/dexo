@@ -1,52 +1,22 @@
 import CookedHTML
 import UIKit
 
-/// A UITextView subclass that disables text selection while preserving link tap interaction.
-/// `isSelectable` remains `true` (required for link detection), but selection handles and
-/// copy/paste menus are suppressed.
+/// A UITextView subclass that preserves link tap interaction and system text selection/copy.
 /// Also handles tap-to-reveal for inline spoiler text ranges (`<span class="spoiler">`).
 final class LinkTextView: UITextView {
+    private var hasSpoiler = false
     private var spoilerRevealed = false
     private var spoilerRanges: [NSRange] = []
-    /// Tap-catching containers. Alpha stays at 1 so UIKit hit-testing keeps
-    /// routing taps to them even when `blurViews` are faded out (alpha < 0.01
-    /// would otherwise skip the view during hit-test).
-    private var spoilerContainers: [UIView] = []
-    /// The actual blur views nested inside each container — these are what we
-    /// animate for reveal/hide.
-    private var blurViews: [UIVisualEffectView] = []
+    private var blurOverlays: [UIVisualEffectView] = []
+    private var blurAnimators: [UIViewPropertyAnimator] = []
     private var needsBlurLayout = false
 
-    /// Full-intensity blur style used for inline spoilers. We keep `effect`
-    /// static and toggle `alpha` — animating `effect` via UIView.animate is
-    /// unreliable on iOS and causes the "reveal flashes then snaps back" bug.
-    private static let blurStyle: UIBlurEffect.Style = .systemThinMaterial
+    /// Blur intensity for inline spoiler (0 = none, 1 = full).
+    private static let blurFraction: CGFloat = 0.7
 
-    override var selectedTextRange: UITextRange? {
-        get { nil }
-        set { }
+    deinit {
+        cleanUpAnimators()
     }
-
-    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
-        false
-    }
-
-    override func didMoveToWindow() {
-        super.didMoveToWindow()
-        // Disable all built-in long press gestures (loupe/selection) so they don't
-        // conflict with the cell's long press gesture. Link taps still work via tap.
-        gestureRecognizers?.forEach { gesture in
-            if gesture is UILongPressGestureRecognizer {
-                gesture.isEnabled = false
-            }
-        }
-    }
-
-    override func selectionRects(for range: UITextRange) -> [UITextSelectionRect] {
-        []
-    }
-
-    deinit {}
 
     /// Call after setting attributedText to enable inline spoiler tap handling if needed.
     func configureSpoilerIfNeeded() {
@@ -58,7 +28,8 @@ final class LinkTextView: UITextView {
             if value != nil { ranges.append(range) }
         }
 
-        guard !ranges.isEmpty else { return }
+        hasSpoiler = !ranges.isEmpty
+        guard hasSpoiler else { return }
         spoilerRanges = ranges
         needsBlurLayout = true
         setNeedsLayout()
@@ -76,71 +47,85 @@ final class LinkTextView: UITextView {
 
     // MARK: - Blur Overlays
 
-    private func createBlurOverlays() {
-        spoilerContainers.forEach { $0.removeFromSuperview() }
-        spoilerContainers.removeAll()
-        blurViews.removeAll()
+    private func cleanUpAnimators() {
+        for animator in blurAnimators {
+            animator.stopAnimation(true)
+            animator.finishAnimation(at: .current)
+        }
+        blurAnimators.removeAll()
+    }
 
-        let effect = UIBlurEffect(style: Self.blurStyle)
+    private func createBlurOverlays() {
+        cleanUpAnimators()
+        blurOverlays.forEach { $0.removeFromSuperview() }
+        blurOverlays.removeAll()
 
         for range in spoilerRanges {
             layoutManager.ensureLayout(forCharacterRange: range)
             let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
 
-            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { lineRect, usedRect, _, lineGlyphRange, _ in
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphRange) { _, _, _, lineGlyphRange, _ in
                 let intersection = NSIntersectionRange(glyphRange, lineGlyphRange)
                 guard intersection.length > 0 else { return }
 
-                let glyphRect = self.layoutManager.boundingRect(
+                var rect = self.layoutManager.boundingRect(
                     forGlyphRange: intersection, in: self.textContainer
                 )
-
-                // Snap to the line-fragment edges (container right, not the
-                // tight `usedRect`) whenever the spoiler reaches that edge of
-                // this line. `usedRect.maxX` varies with each line's content
-                // length so adjacent / wrapped spoilers still looked jagged —
-                // using `lineRect.maxX` puts every affected row's right edge
-                // on the same column.
-                let lineEnd = lineGlyphRange.location + lineGlyphRange.length
-                let extendsToLineStart = intersection.location <= lineGlyphRange.location
-                let extendsToLineEnd = intersection.location + intersection.length >= lineEnd
-                let left = extendsToLineStart ? lineRect.minX : glyphRect.minX
-                let right = extendsToLineEnd ? lineRect.maxX : glyphRect.maxX
-
-                var rect = CGRect(x: left, y: usedRect.minY, width: right - left, height: usedRect.height)
                 rect.origin.x += self.textContainerInset.left
                 rect.origin.y += self.textContainerInset.top
                 rect = rect.integral
                 guard rect.width > 0, rect.height > 0 else { return }
 
-                let container = UIView(frame: rect)
-                container.isUserInteractionEnabled = true
-                container.layer.cornerRadius = 3
-                container.clipsToBounds = true
-                let tap = UITapGestureRecognizer(target: self, action: #selector(self.toggleSpoiler))
-                container.addGestureRecognizer(tap)
+                let overlay = UIVisualEffectView(effect: nil)
+                overlay.frame = rect
+                overlay.layer.cornerRadius = 3
+                overlay.clipsToBounds = true
+                overlay.isUserInteractionEnabled = false
+                self.addSubview(overlay)
+                self.blurOverlays.append(overlay)
 
-                let blur = UIVisualEffectView(effect: effect)
-                blur.frame = container.bounds
-                blur.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-                blur.isUserInteractionEnabled = false
-                blur.alpha = self.spoilerRevealed ? 0 : 1
-                container.addSubview(blur)
-
-                self.addSubview(container)
-                self.spoilerContainers.append(container)
-                self.blurViews.append(blur)
+                let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) {
+                    overlay.effect = UIBlurEffect(style: .systemThinMaterial)
+                }
+                animator.fractionComplete = Self.blurFraction
+                animator.pausesOnCompletion = true
+                self.blurAnimators.append(animator)
             }
         }
     }
 
-    // MARK: - Reveal
+    // MARK: - Touch Handling
 
-    @objc private func toggleSpoiler() {
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if hasSpoiler, let touch = touches.first {
+            let point = touch.location(in: self)
+            let hitSpoiler = blurOverlays.contains { $0.frame.contains(point) }
+            if hitSpoiler {
+                toggleSpoiler()
+                return
+            }
+        }
+        super.touchesEnded(touches, with: event)
+    }
+
+    private func toggleSpoiler() {
         spoilerRevealed.toggle()
-        let targetAlpha: CGFloat = spoilerRevealed ? 0 : 1
-        UIView.animate(withDuration: 0.25) {
-            self.blurViews.forEach { $0.alpha = targetAlpha }
+        cleanUpAnimators()
+
+        if spoilerRevealed {
+            UIView.animate(withDuration: 0.25) {
+                self.blurOverlays.forEach { $0.effect = nil }
+            }
+        } else {
+            for overlay in blurOverlays {
+                overlay.effect = nil
+                let animator = UIViewPropertyAnimator(duration: 1, curve: .linear) {
+                    overlay.effect = UIBlurEffect(style: .systemThinMaterial)
+                }
+                animator.fractionComplete = Self.blurFraction
+                animator.pausesOnCompletion = true
+                blurAnimators.append(animator)
+            }
         }
     }
 }

@@ -3,13 +3,19 @@ import UIKit
 final class BookmarksViewController: ObservableViewController {
     private let api: DiscourseAPI
     private let viewModel: BookmarksViewModel
+    private weak var authGate: AuthGating?
 
     private lazy var tableView: UITableView = {
-        let tv = ThemedTableView(frame: .zero, style: .plain)
+        let tv = UITableView(frame: .zero, style: .plain)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(BookmarkCell.self, forCellReuseIdentifier: BookmarkCell.reuseIdentifier)
         tv.delegate = self
         tv.dataSource = self
+        tv.separatorStyle = .none
+        tv.backgroundColor = .systemGroupedBackground
+        tv.rowHeight = UITableView.automaticDimension
+        tv.estimatedRowHeight = BookmarkCell.estimatedHeight
+        tv.showsVerticalScrollIndicator = false
         return tv
     }()
 
@@ -20,15 +26,51 @@ final class BookmarksViewController: ObservableViewController {
         return ai
     }()
 
-    private let emptyLabel: UILabel = {
+    private let stateIconView: UIImageView = {
+        let imageView = UIImageView()
+        imageView.contentMode = .scaleAspectFit
+        imageView.tintColor = .tertiaryLabel
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        return imageView
+    }()
+
+    private let stateLabel: UILabel = {
         let label = UILabel()
-        label.text = String(localized: "me.bookmarks.empty")
         label.textColor = .secondaryLabel
         label.textAlignment = .center
         label.numberOfLines = 0
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.isHidden = true
         return label
+    }()
+
+    private let loginButton: UIButton = {
+        var config = UIButton.Configuration.filled()
+        config.title = String(localized: "me.login")
+        config.cornerStyle = .medium
+        let button = UIButton(configuration: config)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true
+        return button
+    }()
+
+    private let retryButton: UIButton = {
+        var config = UIButton.Configuration.tinted()
+        config.title = String(localized: "action.retry")
+        config.cornerStyle = .medium
+        let button = UIButton(configuration: config)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.isHidden = true
+        return button
+    }()
+
+    private lazy var stateStackView: UIStackView = {
+        let stack = UIStackView(arrangedSubviews: [stateIconView, stateLabel, loginButton, retryButton])
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        stack.isHidden = true
+        return stack
     }()
 
     private lazy var refreshControl: UIRefreshControl = {
@@ -37,11 +79,19 @@ final class BookmarksViewController: ObservableViewController {
         return rc
     }()
 
-    init(api: DiscourseAPI, username: String) {
+    init(api: DiscourseAPI, username: String, authGate: AuthGating? = nil) {
         self.api = api
         self.viewModel = BookmarksViewModel(api: api, username: username)
+        self.authGate = authGate
         super.init(nibName: nil, bundle: nil)
         hidesBottomBarWhenPushed = true
+    }
+
+    init(api: DiscourseAPI, authGate: AuthGating?) {
+        self.api = api
+        self.viewModel = BookmarksViewModel(api: api, username: authGate?.currentUsername())
+        self.authGate = authGate
+        super.init(nibName: nil, bundle: nil)
     }
 
     @available(*, unavailable)
@@ -52,13 +102,13 @@ final class BookmarksViewController: ObservableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "me.bookmarks")
+        view.backgroundColor = .systemGroupedBackground
+
         tableView.refreshControl = refreshControl
-        // Hide the plain-style table's top hairline (same trick used by HomeViewController).
-        tableView.tableHeaderView = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: CGFloat.leastNormalMagnitude))
 
         view.addSubview(tableView)
         view.addSubview(activityIndicator)
-        view.addSubview(emptyLabel)
+        view.addSubview(stateStackView)
 
         NSLayoutConstraint.activate([
             tableView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -69,38 +119,105 @@ final class BookmarksViewController: ObservableViewController {
             activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
 
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 32),
-            emptyLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -32),
+            stateStackView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stateStackView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            stateStackView.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 32),
+            stateStackView.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
+
+            stateIconView.widthAnchor.constraint(equalToConstant: 58),
+            stateIconView.heightAnchor.constraint(equalToConstant: 58),
         ])
 
+        loginButton.addTarget(self, action: #selector(loginTapped), for: .touchUpInside)
+        retryButton.addTarget(self, action: #selector(retryTapped), for: .touchUpInside)
+
         Task {
-            await viewModel.loadBookmarks()
+            await loadBookmarks()
         }
     }
 
     override func updateUI() {
-        if viewModel.isLoading {
+        refreshControl.endRefreshing()
+
+        let hasBookmarks = !viewModel.bookmarks.isEmpty
+        if viewModel.isLoading && !hasBookmarks {
             activityIndicator.startAnimating()
         } else {
             activityIndicator.stopAnimating()
         }
 
-        if !viewModel.isLoading, viewModel.bookmarks.isEmpty {
-            emptyLabel.isHidden = false
-        } else {
-            emptyLabel.isHidden = true
+        tableView.isHidden = !hasBookmarks
+        stateStackView.isHidden = hasBookmarks || viewModel.isLoading
+
+        if viewModel.requiresLogin {
+            configureState(
+                iconName: "lock.circle",
+                text: viewModel.errorMessage ?? String(localized: "login.required.message"),
+                showLogin: authGate != nil,
+                showRetry: authGate == nil
+            )
+        } else if let errorMessage = viewModel.errorMessage, !hasBookmarks {
+            configureState(
+                iconName: "exclamationmark.triangle",
+                text: errorMessage,
+                showLogin: false,
+                showRetry: true
+            )
+        } else if !hasBookmarks, !viewModel.isLoading {
+            configureState(
+                iconName: "bookmark",
+                text: String(localized: "me.bookmarks.empty"),
+                showLogin: false,
+                showRetry: false
+            )
         }
 
         tableView.reloadData()
     }
 
+    private func configureState(iconName: String, text: String, showLogin: Bool, showRetry: Bool) {
+        stateIconView.image = UIImage(
+            systemName: iconName,
+            withConfiguration: UIImage.SymbolConfiguration(pointSize: 50, weight: .regular)
+        )
+        stateLabel.text = text
+        loginButton.isHidden = !showLogin
+        retryButton.isHidden = !showRetry
+    }
+
+    private func refreshUsernameFromAuthGate() {
+        viewModel.updateUsername(authGate?.currentUsername())
+    }
+
+    private func loadBookmarks() async {
+        if authGate != nil {
+            refreshUsernameFromAuthGate()
+        }
+        await viewModel.loadBookmarks()
+    }
+
     @objc private func pullToRefresh() {
         Task {
+            if authGate != nil {
+                refreshUsernameFromAuthGate()
+            }
             await viewModel.reload()
-            refreshControl.endRefreshing()
         }
+    }
+
+    @objc private func retryTapped() {
+        Task {
+            await loadBookmarks()
+        }
+    }
+
+    @objc private func loginTapped() {
+        authGate?.requireAuth(then: { [weak self] in
+            guard let self else { return }
+            Task {
+                await self.loadBookmarks()
+            }
+        })
     }
 }
 
@@ -116,8 +233,7 @@ extension BookmarksViewController: UITableViewDataSource {
             return UITableViewCell()
         }
         let bookmark = viewModel.bookmarks[indexPath.row]
-        cell.configure(with: bookmark, assetBaseURL: api.assetBaseURL)
-        cell.accessoryType = .disclosureIndicator
+        cell.configure(with: bookmark, baseURL: api.baseURL)
         return cell
     }
 }
@@ -129,7 +245,7 @@ extension BookmarksViewController: UITableViewDelegate {
         tableView.deselectRow(at: indexPath, animated: true)
         let bookmark = viewModel.bookmarks[indexPath.row]
         if let topicId = bookmark.topicId {
-            let detailVC = TopicDetailViewController(api: api, topicId: topicId, initialFloor: bookmark.linkedPostNumber)
+            let detailVC = TopicDetailViewController(api: api, topicId: topicId)
             navigationController?.pushViewController(detailVC, animated: true)
         }
     }

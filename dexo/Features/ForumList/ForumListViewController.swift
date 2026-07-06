@@ -1,22 +1,20 @@
 import UIKit
 
 final class ForumListViewController: ObservableViewController {
-    override var backgroundStyle: BackgroundStyle { .grouped }
-
     private let viewModel = ForumListViewModel()
     private let settings = AppSettings.shared
     private var hasAttemptedAutoOpen = false
 
     private lazy var tableView: UITableView = {
-        let tv = ThemedTableView(frame: .zero, style: .insetGrouped)
+        let tv = UITableView(frame: .zero, style: .insetGrouped)
         tv.translatesAutoresizingMaskIntoConstraints = false
         tv.register(ForumListCell.self, forCellReuseIdentifier: ForumListCell.reuseIdentifier)
         tv.delegate = self
         return tv
     }()
 
-    private lazy var dataSource: ReorderableDataSource = {
-        let ds = ReorderableDataSource(tableView: tableView) { [weak self] tableView, indexPath, forumId in
+    private lazy var dataSource: UITableViewDiffableDataSource<Int, Int64> = {
+        UITableViewDiffableDataSource<Int, Int64>(tableView: tableView) { [weak self] tableView, indexPath, forumId in
             guard let self,
                   let cell = tableView.dequeueReusableCell(withIdentifier: ForumListCell.reuseIdentifier, for: indexPath) as? ForumListCell,
                   let forum = self.viewModel.forums.first(where: { $0.id == forumId }) else {
@@ -25,21 +23,12 @@ final class ForumListViewController: ObservableViewController {
             cell.configure(with: forum)
             return cell
         }
-        ds.onMove = { [weak self] from, to in
-            self?.viewModel.moveForum(from: from.row, to: to.row)
-        }
-        return ds
     }()
 
     override func viewDidLoad() {
         super.viewDidLoad()
         title = String(localized: "tab.forums")
-        navigationItem.rightBarButtonItem = UIBarButtonItem(
-            barButtonSystemItem: .add,
-            target: self,
-            action: #selector(addForumTapped)
-        )
-        navigationItem.leftBarButtonItem = editButtonItem
+        view.backgroundColor = .systemGroupedBackground
 
         view.addSubview(tableView)
         NSLayoutConstraint.activate([
@@ -71,19 +60,6 @@ final class ForumListViewController: ObservableViewController {
         dataSource.apply(snapshot, animatingDifferences: true)
     }
 
-    override func setEditing(_ editing: Bool, animated: Bool) {
-        super.setEditing(editing, animated: animated)
-        tableView.setEditing(editing, animated: animated)
-    }
-
-    @objc private func addForumTapped() {
-        let addVC = AddForumViewController()
-        addVC.onForumAdded = { [weak self] in
-            self?.viewModel.loadForums()
-        }
-        let nav = UINavigationController(rootViewController: addVC)
-        present(nav, animated: true)
-    }
 }
 
 // MARK: - UITableViewDelegate
@@ -117,48 +93,6 @@ extension ForumListViewController: UITableViewDelegate {
     }
 
     func tableView(_ tableView: UITableView, trailingSwipeActionsConfigurationForRowAt indexPath: IndexPath) -> UISwipeActionsConfiguration? {
-        let deleteAction = UIContextualAction(style: .destructive, title: "Delete") { [weak self] _, _, completion in
-            self?.viewModel.deleteForum(at: indexPath.row)
-            completion(true)
-        }
-        return UISwipeActionsConfiguration(actions: [deleteAction])
-    }
-
-    func tableView(_ tableView: UITableView, editingStyleForRowAt indexPath: IndexPath) -> UITableViewCell.EditingStyle {
-        .none
-    }
-
-    func tableView(_ tableView: UITableView, shouldIndentWhileEditingRowAt indexPath: IndexPath) -> Bool {
-        false
-    }
-}
-
-// MARK: - Reorderable diffable data source
-
-private final class ReorderableDataSource: UITableViewDiffableDataSource<Int, Int64> {
-    var onMove: ((IndexPath, IndexPath) -> Void)?
-
-    override func tableView(_ tableView: UITableView, canMoveRowAt indexPath: IndexPath) -> Bool {
-        true
-    }
-
-    override func tableView(_ tableView: UITableView, moveRowAt sourceIndexPath: IndexPath, to destinationIndexPath: IndexPath) {
-        // Sync the data source's snapshot with the move the table view just animated.
-        // Without this, the next `apply(...)` (e.g. from observation tracking after
-        // the model mutates) diffs against a stale snapshot and re-animates the row,
-        // which produces the "drop position doesn't stick" behaviour.
-        var snap = snapshot()
-        let items = snap.itemIdentifiers(inSection: 0)
-        guard sourceIndexPath.row < items.count else { return }
-        let moved = items[sourceIndexPath.row]
-        snap.deleteItems([moved])
-        let remaining = snap.itemIdentifiers(inSection: 0)
-        if destinationIndexPath.row >= remaining.count {
-            snap.appendItems([moved], toSection: 0)
-        } else {
-            snap.insertItems([moved], beforeItem: remaining[destinationIndexPath.row])
-        }
-        apply(snap, animatingDifferences: false)
-        onMove?(sourceIndexPath, destinationIndexPath)
+        nil
     }
 }

@@ -2,30 +2,24 @@ import Foundation
 
 enum SearchSortOrder: String, CaseIterable {
     case relevance
-    case latestTopic = "latest_topic"
     case latest
     case likes
     case views
-    case read
+    case latestTopic = "latest_topic"
 
     var displayName: String {
         switch self {
         case .relevance: String(localized: "search.sort.relevance")
-        case .latestTopic: String(localized: "search.sort.latest_topic")
         case .latest: String(localized: "search.sort.latest")
         case .likes: String(localized: "search.sort.most_likes")
         case .views: String(localized: "search.sort.most_views")
-        case .read: String(localized: "search.sort.read")
+        case .latestTopic: String(localized: "search.sort.latest_topic")
         }
     }
 }
 
-import Perception
-
-@Perceptible
-final class SearchViewModel {
+final class SearchViewModel: DexoObservableObject {
     var searchResults: [DiscourseSearchResult.SearchPost] = []
-    private(set) var topicsById: [Int: DiscourseSearchResult.SearchTopic] = [:]
     var isSearching = false
     var canLoadMore = false
     var hasSearched = false
@@ -34,15 +28,7 @@ final class SearchViewModel {
     var categories: [DiscourseCategory] = []
     var selectedCategoryId: Int?
     var selectedTag: String?
-    var selectedSortOrder: SearchSortOrder = {
-        if let raw = UserDefaults.standard.string(forKey: "searchSortOrder"),
-           let order = SearchSortOrder(rawValue: raw) {
-            return order
-        }
-        return .latest
-    }() {
-        didSet { UserDefaults.standard.set(selectedSortOrder.rawValue, forKey: "searchSortOrder") }
-    }
+    var selectedSortOrder: SearchSortOrder = .latest
 
     private let api: DiscourseAPI
     private var currentPage = 0
@@ -58,18 +44,26 @@ final class SearchViewModel {
         return categoriesById[id]
     }
 
+    func categoryDisplayName(for category: DiscourseCategory?) -> String? {
+        guard let category else { return nil }
+        let resolved = categoriesById[category.id] ?? category
+        return resolved.displayName(parent: parentCategory(for: resolved))
+    }
+
     func loadCategories() async {
         do {
-            let catList = try await api.fetchCategories()
-            categories = catList.categoryList.categories
-            for cat in categories {
-                categoriesById[cat.id] = cat
-                if let subs = cat.subcategoryList {
-                    for sub in subs {
-                        categoriesById[sub.id] = sub
-                    }
-                }
+            categoriesById.removeAll()
+            let siteCategories = (try? await api.fetchSiteCategories()) ?? []
+            if !siteCategories.isEmpty {
+                let visibleCategories = siteCategories.filter { $0.id != 1 }
+                categories = DiscourseCategory.hierarchy(fromFlat: visibleCategories)
+                indexCategories(visibleCategories)
+            } else {
+                let catList = try await api.fetchCategories()
+                categories = DiscourseCategory.normalizedTree(fromNested: catList.categoryList.categories)
+                indexCategories(categories)
             }
+            notifyChanged()
         } catch {}
     }
 
@@ -78,6 +72,7 @@ final class SearchViewModel {
         guard !query.isEmpty else {
             searchResults = []
             hasSearched = false
+            notifyChanged()
             return
         }
 
@@ -86,24 +81,25 @@ final class SearchViewModel {
         currentPage = 0
         hasSearched = true
         errorMessage = nil
+        notifyChanged()
 
         do {
             let result = try await api.search(term: query, page: 0)
             searchResults = result.posts ?? []
-            topicsById = Self.buildTopicsMap(from: result)
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             searchResults = []
-            topicsById = [:]
             canLoadMore = false
             errorMessage = error.localizedDescription
         }
         isSearching = false
+        notifyChanged()
     }
 
     func loadMoreResults() async {
         guard canLoadMore, !isSearching else { return }
         isSearching = true
+        notifyChanged()
         let nextPage = currentPage + 1
         let query = buildQuery(term: currentTerm)
 
@@ -113,18 +109,13 @@ final class SearchViewModel {
             let existingIds = Set(searchResults.map(\.id))
             let filtered = newPosts.filter { !existingIds.contains($0.id) }
             searchResults.append(contentsOf: filtered)
-            topicsById.merge(Self.buildTopicsMap(from: result)) { _, new in new }
             currentPage = nextPage
             canLoadMore = result.groupedSearchResult?.morePosts ?? false
         } catch {
             canLoadMore = false
         }
         isSearching = false
-    }
-
-    private static func buildTopicsMap(from result: DiscourseSearchResult) -> [Int: DiscourseSearchResult.SearchTopic] {
-        guard let topics = result.topics else { return [:] }
-        return Dictionary(uniqueKeysWithValues: topics.map { ($0.id, $0) })
+        notifyChanged()
     }
 
     private func buildQuery(term: String) -> String {
@@ -142,5 +133,17 @@ final class SearchViewModel {
             parts.append("order:\(selectedSortOrder.rawValue)")
         }
         return parts.joined(separator: " ")
+    }
+
+    private func indexCategories(_ categories: [DiscourseCategory]) {
+        let indexed = DiscourseCategory.indexedById(from: categories)
+        for (id, category) in indexed {
+            categoriesById[id] = category
+        }
+    }
+
+    private func parentCategory(for category: DiscourseCategory) -> DiscourseCategory? {
+        guard let parentId = category.parentCategoryId else { return nil }
+        return categoriesById[parentId]
     }
 }

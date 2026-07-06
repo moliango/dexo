@@ -10,28 +10,12 @@ struct ForumInstance: Sendable, Codable, Identifiable, Equatable, Hashable,
     var title: String
     var baseURL: String
     var iconURL: String?
-    var apiKey: String?
-    var apiUsername: String?
     var username: String?
     var addedAt: Date
     var sortOrder: Int
 
-    var assetBaseURL: String {
-        return baseURL
-//        guard let iconURL,
-//              let url = URL(string: iconURL),
-//              let scheme = url.scheme,
-//              let host = url.host
-//        else {
-//            return baseURL
-//        }
-//
-//        var components = URLComponents()
-//        components.scheme = scheme
-//        components.host = host
-//        components.port = url.port
-//        return components.url?.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? baseURL
-    }
+    static let linuxDoTitle = "Linux.do"
+    static let linuxDoBaseURL = "https://linux.do"
 
     static func new(title: String, baseURL: String, iconURL: String? = nil) -> ForumInstance {
         ForumInstance(
@@ -39,12 +23,25 @@ struct ForumInstance: Sendable, Codable, Identifiable, Equatable, Hashable,
             title: title,
             baseURL: baseURL,
             iconURL: iconURL,
-            apiKey: nil,
-            apiUsername: nil,
             username: nil,
             addedAt: Date(),
             sortOrder: 0
         )
+    }
+
+    static func linuxDoDefault() -> ForumInstance {
+        new(title: linuxDoTitle, baseURL: linuxDoBaseURL)
+    }
+
+    static func normalizedBaseURL(_ rawValue: String) -> String {
+        rawValue
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            .lowercased()
+    }
+
+    var isLinuxDoDefault: Bool {
+        Self.normalizedBaseURL(baseURL) == Self.linuxDoBaseURL
     }
 
     mutating func didInsert(_ inserted: InsertionSuccess) {

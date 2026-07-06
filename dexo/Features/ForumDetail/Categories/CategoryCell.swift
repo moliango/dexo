@@ -117,7 +117,7 @@ final class CategoryCell: UITableViewCell {
             descriptionBottomNoSubs.isActive = false
             subcategoryStackBottomWithDesc.isActive = true
             for sub in subs {
-                let tag = makeSubcategoryTag(name: sub.name, hex: sub.color)
+                let tag = makeSubcategoryTag(name: sub.displayName(parent: category), hex: sub.color)
                 subcategoryStack.addArrangedSubview(tag)
             }
         }
